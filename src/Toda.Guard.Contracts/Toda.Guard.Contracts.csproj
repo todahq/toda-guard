@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Public contracts of toda-guard: the directory connector SPI, lookups, and account and group events.</Description>
+  </PropertyGroup>
+
+</Project>
