@@ -29,9 +29,7 @@ public class AccountProjector : ITransientDependency
         List<DirectoryUser> users = await usersQuery.ToListAsync(cancellationToken);
         Dictionary<string, Account> accounts = await accountsQuery.ToDictionaryAsync(a => a.NormalizedUsername, cancellationToken);
 
-        Dictionary<string, DirectoryUser> winners = users
-            .GroupBy(u => u.NormalizedUsername)
-            .ToDictionary(g => g.Key, g => g.OrderBy(u => byId[u.DirectoryId].Order).First());
+        Dictionary<string, DirectoryUser> winners = ResolveOwners(directories, users);
 
         List<object> events = [];
         foreach ((string username, DirectoryUser winner) in winners)
@@ -67,6 +65,19 @@ public class AccountProjector : ITransientDependency
         }
 
         return events;
+    }
+
+    /// <summary>
+    /// Pure: for each username, the record from the first active directory (lowest Order) that has it.
+    /// A disabled record still wins: a same-named user in a later directory never takes over a disabled account.
+    /// </summary>
+    internal static Dictionary<string, DirectoryUser> ResolveOwners(IReadOnlyCollection<UserDirectory> directories, IEnumerable<DirectoryUser> users)
+    {
+        Dictionary<Guid, UserDirectory> active = directories.Where(d => d.IsActive).ToDictionary(d => d.Id);
+        return users
+            .Where(u => active.ContainsKey(u.DirectoryId))
+            .GroupBy(u => u.NormalizedUsername)
+            .ToDictionary(g => g.Key, g => g.OrderBy(u => active[u.DirectoryId].Order).ThenBy(u => u.DirectoryId).First());
     }
 
     private static void Apply(Account account, DirectoryUser winner, UserDirectory directory)

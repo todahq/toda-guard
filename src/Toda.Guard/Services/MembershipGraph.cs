@@ -45,46 +45,7 @@ public class MembershipGraph(IConfiguration configuration) : ITransientDependenc
             directoryUserIds.UnionWith(others);
         }
 
-        if (account.Status != AccountStatus.Active)
-        {
-            return [];
-        }
-
-        List<Guid> direct = snapshot.Memberships
-            .Where(m => (m.MemberType == MemberType.DirectoryUser && directoryUserIds.Contains(m.MemberId))
-                     || (m.MemberType == MemberType.Account && m.MemberId == account.Id))
-            .Select(m => m.GroupId)
-            .Where(snapshot.Groups.ContainsKey)
-            .Distinct()
-            .ToList();
-
-        // Breadth-first upward walk; the first path found to each group is the shortest.
-        Dictionary<Guid, EffectiveGroup> result = [];
-        Queue<(Guid GroupId, List<string> Path)> queue = new();
-        foreach (Guid groupId in direct)
-        {
-            queue.Enqueue((groupId, [snapshot.Groups[groupId].Name]));
-        }
-
-        while (queue.Count > 0)
-        {
-            (Guid groupId, List<string> path) = queue.Dequeue();
-            if (result.ContainsKey(groupId))
-            {
-                continue;
-            }
-
-            result[groupId] = new EffectiveGroup(snapshot.Groups[groupId], path.Count == 1, path);
-            foreach (Guid parentId in snapshot.ParentsOf(groupId))
-            {
-                if (!result.ContainsKey(parentId))
-                {
-                    queue.Enqueue((parentId, [.. path, snapshot.Groups[parentId].Name]));
-                }
-            }
-        }
-
-        return result.Values.OrderBy(g => g.Path.Count).ThenBy(g => g.Group.Name).ToList();
+        return ResolveEffectiveGroups(snapshot, account, directoryUserIds);
     }
 
     public async Task<List<EffectiveMember>> GetEffectiveMembersAsync(GuardDbContext db, Guid groupId, CancellationToken cancellationToken = default)
@@ -95,23 +56,7 @@ public class MembershipGraph(IConfiguration configuration) : ITransientDependenc
             return [];
         }
 
-        // Walk down through nested groups, remembering the path from each descendant back up to this group.
-        Dictionary<Guid, List<string>> groupPaths = new() { [groupId] = [snapshot.Groups[groupId].Name] };
-        Queue<Guid> queue = new([groupId]);
-        while (queue.Count > 0)
-        {
-            Guid current = queue.Dequeue();
-            foreach (Guid child in snapshot.ChildGroupsOf(current))
-            {
-                if (groupPaths.ContainsKey(child))
-                {
-                    continue;
-                }
-
-                groupPaths[child] = [snapshot.Groups[child].Name, .. groupPaths[current]];
-                queue.Enqueue(child);
-            }
-        }
+        Dictionary<Guid, List<string>> groupPaths = DescendantGroupPaths(snapshot, groupId);
 
         List<Account> accounts = await db.Accounts.Where(a => a.Status == AccountStatus.Active).ToListAsync(cancellationToken);
         Dictionary<Guid, Account> byId = accounts.ToDictionary(a => a.Id);
@@ -160,6 +105,81 @@ public class MembershipGraph(IConfiguration configuration) : ITransientDependenc
     public async Task<List<string>?> FindCycleAsync(GuardDbContext db, Guid parentGroupId, Guid childGroupId, CancellationToken cancellationToken = default)
     {
         Snapshot snapshot = await LoadAsync(db, cancellationToken, includeInactiveDirectories: true);
+        return FindCycle(snapshot, parentGroupId, childGroupId);
+    }
+
+    /// <summary>Pure: the groups an account reaches, each with its shortest path, from an in-memory snapshot.</summary>
+    internal static List<EffectiveGroup> ResolveEffectiveGroups(Snapshot snapshot, Account account, IReadOnlySet<Guid> directoryUserIds)
+    {
+        if (account.Status != AccountStatus.Active)
+        {
+            return [];
+        }
+
+        List<Guid> direct = snapshot.Memberships
+            .Where(m => (m.MemberType == MemberType.DirectoryUser && directoryUserIds.Contains(m.MemberId))
+                     || (m.MemberType == MemberType.Account && m.MemberId == account.Id))
+            .Select(m => m.GroupId)
+            .Where(snapshot.Groups.ContainsKey)
+            .Distinct()
+            .ToList();
+
+        // Breadth-first upward walk; the first path found to each group is the shortest.
+        Dictionary<Guid, EffectiveGroup> result = [];
+        Queue<(Guid GroupId, List<string> Path)> queue = new();
+        foreach (Guid groupId in direct)
+        {
+            queue.Enqueue((groupId, [snapshot.Groups[groupId].Name]));
+        }
+
+        while (queue.Count > 0)
+        {
+            (Guid groupId, List<string> path) = queue.Dequeue();
+            if (result.ContainsKey(groupId))
+            {
+                continue;
+            }
+
+            result[groupId] = new EffectiveGroup(snapshot.Groups[groupId], path.Count == 1, path);
+            foreach (Guid parentId in snapshot.ParentsOf(groupId))
+            {
+                if (!result.ContainsKey(parentId))
+                {
+                    queue.Enqueue((parentId, [.. path, snapshot.Groups[parentId].Name]));
+                }
+            }
+        }
+
+        return result.Values.OrderBy(g => g.Path.Count).ThenBy(g => g.Group.Name).ToList();
+    }
+
+    /// <summary>Pure: every group at or below the given one, with the path from it back up to the given group.</summary>
+    internal static Dictionary<Guid, List<string>> DescendantGroupPaths(Snapshot snapshot, Guid groupId)
+    {
+        // Walk down through nested groups, remembering the path from each descendant back up to this group.
+        Dictionary<Guid, List<string>> groupPaths = new() { [groupId] = [snapshot.Groups[groupId].Name] };
+        Queue<Guid> queue = new([groupId]);
+        while (queue.Count > 0)
+        {
+            Guid current = queue.Dequeue();
+            foreach (Guid child in snapshot.ChildGroupsOf(current))
+            {
+                if (groupPaths.ContainsKey(child))
+                {
+                    continue;
+                }
+
+                groupPaths[child] = [snapshot.Groups[child].Name, .. groupPaths[current]];
+                queue.Enqueue(child);
+            }
+        }
+
+        return groupPaths;
+    }
+
+    /// <summary>Pure: the loop that adding child to parent would create, or null if it is safe.</summary>
+    internal static List<string>? FindCycle(Snapshot snapshot, Guid parentGroupId, Guid childGroupId)
+    {
         string Name(Guid id) => snapshot.Groups.TryGetValue(id, out Group? g) ? g.Name : id.ToString();
 
         if (parentGroupId == childGroupId)
@@ -222,7 +242,7 @@ public class MembershipGraph(IConfiguration configuration) : ITransientDependenc
         return new Snapshot(activeDirectoryIds, groups, memberships);
     }
 
-    private sealed class Snapshot(HashSet<Guid> activeDirectoryIds, Dictionary<Guid, Group> groups, List<GroupMembership> memberships)
+    internal sealed class Snapshot(HashSet<Guid> activeDirectoryIds, Dictionary<Guid, Group> groups, List<GroupMembership> memberships)
     {
         private readonly ILookup<Guid, Guid> _parents = memberships
             .Where(m => m.MemberType == MemberType.Group && groups.ContainsKey(m.MemberId))

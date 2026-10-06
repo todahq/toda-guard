@@ -14,6 +14,7 @@ namespace Toda.Guard.Controllers;
 /// events are published and plugin handlers always see committed data.
 /// </summary>
 [UnitOfWork(IsDisabled = true)]
+[ApiExplorerSettings(IgnoreApi = false)] // visible in /openapi/v1.json (ABP hides non-remote-service controllers otherwise)
 public abstract class GuardControllerBase : AbpControllerBase
 {
     protected Guid CurrentAccountId =>

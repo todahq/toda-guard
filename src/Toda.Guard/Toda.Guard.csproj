@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Toda.Guard.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Toda.Platform\Toda.Platform.csproj" />
     <ProjectReference Include="..\Toda.Guard.Contracts\Toda.Guard.Contracts.csproj" />
     <!-- The open-source authorization library, from its own repository next to this one. -->
