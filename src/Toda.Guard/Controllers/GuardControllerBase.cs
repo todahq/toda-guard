@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Toda.Guard.Domain;
+using Toda.Guard.Services;
 using Toda.Sdk;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Uow;
@@ -21,6 +22,32 @@ public abstract class GuardControllerBase : AbpControllerBase
             : throw new Volo.Abp.Authorization.AbpAuthorizationException("Not signed in.");
 
     protected string? ClientIp => HttpContext.Connection.RemoteIpAddress?.ToString();
+
+    protected Task<Toda.Authz.Ability> AbilityAsync(CancellationToken cancellationToken = default) =>
+        HttpContext.RequestServices.GetRequiredService<AbilityFactory>().ForAccountAsync(CurrentAccountId, cancellationToken);
+
+    /// <summary>403 with the rule's reason when the ability denies the action on this object.</summary>
+    protected static void Ensure(Toda.Authz.Ability ability, string action, object subject, string? field = null)
+    {
+        try
+        {
+            ability.EnsureCan(action, subject, field);
+        }
+        catch (Toda.Authz.ForbiddenException ex)
+        {
+            // UserFriendlyException keeps the reason in the 403 body; ABP answers its authorization exception with an empty Forbid.
+            throw new Volo.Abp.UserFriendlyException(ex.Message, "Toda:Forbidden");
+        }
+    }
+
+    /// <summary>403 unless the user may do this to at least some instances of the subject.</summary>
+    protected static void Ensure(Toda.Authz.Ability ability, string action, string subject)
+    {
+        if (!ability.Can(action, subject))
+        {
+            throw new Volo.Abp.UserFriendlyException($"You can't {action} {subject} records.", "Toda:Forbidden");
+        }
+    }
 
     protected async Task PublishAsync(IEnumerable<object> events)
     {

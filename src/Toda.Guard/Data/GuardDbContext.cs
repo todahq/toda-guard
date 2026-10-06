@@ -17,6 +17,9 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     public DbSet<GroupMembership> Memberships => Set<GroupMembership>();
     public DbSet<SyncRun> SyncRuns => Set<SyncRun>();
     public DbSet<SecurityEvent> SecurityEvents => Set<SecurityEvent>();
+    public DbSet<Role> Roles => Set<Role>();
+    public DbSet<RoleRule> RoleRules => Set<RoleRule>();
+    public DbSet<RoleGrant> RoleGrants => Set<RoleGrant>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -73,6 +76,30 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
         {
             b.ToTable("sync_runs");
             b.HasIndex(x => new { x.DirectoryId, x.StartedAt });
+        });
+
+        builder.Entity<Role>(b =>
+        {
+            b.ToTable("roles");
+            b.Property(x => x.Key).HasMaxLength(64).IsRequired();
+            b.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            b.HasIndex(x => x.Key).IsUnique();
+        });
+
+        builder.Entity<RoleRule>(b =>
+        {
+            b.ToTable("role_rules");
+            b.Property(x => x.Json).HasColumnType("jsonb").IsRequired();
+            b.HasIndex(x => new { x.RoleId, x.Order });
+        });
+
+        builder.Entity<RoleGrant>(b =>
+        {
+            b.ToTable("role_grants");
+            b.Property(x => x.PrincipalType).HasConversion<string>().HasMaxLength(16);
+            b.Property(x => x.ScopeJson).HasColumnType("jsonb").IsRequired();
+            b.HasIndex(x => new { x.PrincipalType, x.PrincipalId });
+            b.HasIndex(x => x.RoleId);
         });
 
         builder.Entity<SecurityEvent>(b =>

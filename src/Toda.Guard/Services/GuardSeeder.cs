@@ -39,6 +39,8 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
         await projector.RebuildAsync(db, cancellationToken: cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
+        await EnsureRolesAsync(db, cancellationToken);
+
         Account adminAccount = await db.Accounts.FirstAsync(a => a.NormalizedUsername == "admin", cancellationToken);
         if (!await db.Memberships.AnyAsync(m => m.GroupId == GuardConstants.AdminsGroupId && m.MemberType == MemberType.Account && m.MemberId == adminAccount.Id, cancellationToken))
         {
@@ -46,6 +48,51 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
             await db.SaveChangesAsync(cancellationToken);
         }
     }, requiresNew: true, cancellationToken);
+
+    /// <summary>
+    /// System roles. Administrator is granted to the toda-admins group, so admin rights follow group membership,
+    /// nested groups included. Directory helpdesk is an example of a scoped role: its grant's scope says which
+    /// directories it covers.
+    /// </summary>
+    private static async Task EnsureRolesAsync(GuardDbContext db, CancellationToken cancellationToken)
+    {
+        (Guid Id, string Key, string Name, string Description, string[] Rules)[] roles =
+        [
+            (GuardRoles.AdministratorId, "administrator", "Administrator", "Can do everything.",
+            [
+                """{ "action": "manage", "subject": "all" }""",
+            ]),
+            (GuardRoles.DirectoryHelpdeskId, "directory-helpdesk", "Directory helpdesk",
+                "Sees and can lock or unlock accounts in the directories named in the grant's scope (directoryIds).",
+            [
+                """{ "action": "read", "subject": "Account", "conditions": { "directoryId": { "$in": "${grant.directoryIds}" } } }""",
+                """{ "action": ["lock", "unlock"], "subject": "Account", "conditions": { "directoryId": { "$in": "${grant.directoryIds}" } } }""",
+                """{ "action": ["lock", "unlock"], "subject": "Account", "inverted": true, "conditions": { "id": "${user.id}" }, "reason": "You can't lock or unlock your own account." }""",
+                """{ "action": "read", "subject": "Group", "conditions": { "directoryId": { "$in": "${grant.directoryIds}" } } }""",
+            ]),
+        ];
+
+        foreach ((Guid id, string key, string name, string description, string[] rules) in roles)
+        {
+            if (await db.Roles.AnyAsync(r => r.Id == id, cancellationToken))
+            {
+                continue;
+            }
+
+            db.Roles.Add(new Role(id, key, name, isSystem: true) { Description = description });
+            for (int i = 0; i < rules.Length; i++)
+            {
+                db.RoleRules.Add(new RoleRule(Guid.NewGuid(), id, i, rules[i]));
+            }
+        }
+
+        if (!await db.RoleGrants.AnyAsync(g => g.RoleId == GuardRoles.AdministratorId && g.PrincipalId == GuardConstants.AdminsGroupId, cancellationToken))
+        {
+            db.RoleGrants.Add(new RoleGrant(Guid.NewGuid(), GuardRoles.AdministratorId, PrincipalType.Group, GuardConstants.AdminsGroupId, "{}"));
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
 
     private static async Task EnsureGroupAsync(GuardDbContext db, Guid id, string name, string description, CancellationToken cancellationToken)
     {

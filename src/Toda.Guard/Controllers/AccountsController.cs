@@ -3,22 +3,29 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
-using Toda.Platform.Controllers;
+using Toda.Authz;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities;
 
 namespace Toda.Guard.Controllers;
 
+/// <summary>
+/// Account APIs authorized row by row with Toda.Authz: the list is filtered in SQL with AccessibleBy, and each
+/// action is checked against the account it targets. Admins see everything through "manage all".
+/// </summary>
 [Route("api/guard/accounts")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize]
 public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountProjector projector) : GuardControllerBase
 {
     [HttpGet]
-    public Task<List<AccountDto>> List([FromQuery] string? search, [FromQuery] string? status, CancellationToken cancellationToken) =>
-        guardDb.RunAsync(async db =>
+    public async Task<List<AccountDto>> List([FromQuery] string? search, [FromQuery] string? status, CancellationToken cancellationToken)
+    {
+        Toda.Authz.Ability ability = await AbilityAsync(cancellationToken);
+        Ensure(ability, "read", "Account");
+        return await guardDb.RunAsync(async db =>
         {
             Dictionary<Guid, string> directories = await db.Directories.ToDictionaryAsync(d => d.Id, d => d.Name, cancellationToken);
-            IQueryable<Account> query = db.Accounts.AsNoTracking();
+            IQueryable<Account> query = db.Accounts.AsNoTracking().AccessibleBy(ability, "read"); // filtered in SQL
             if (!string.IsNullOrWhiteSpace(search))
             {
                 string s = GuardConstants.Normalize(search);
@@ -34,13 +41,17 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
                 .Select(a => AccountDto.From(a, directories.GetValueOrDefault(a.DirectoryId, "?")))
                 .ToList();
         }, cancellationToken: cancellationToken);
+    }
 
     [HttpGet("{id:guid}")]
-    public Task<AccountDetailDto> Get(Guid id, CancellationToken cancellationToken) =>
-        guardDb.RunAsync(async db =>
+    public async Task<AccountDetailDto> Get(Guid id, CancellationToken cancellationToken)
+    {
+        Toda.Authz.Ability ability = await AbilityAsync(cancellationToken);
+        return await guardDb.RunAsync(async db =>
         {
             Account account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, cancellationToken)
                 ?? throw new EntityNotFoundException(typeof(Account), id);
+            Ensure(ability, "read", account);
             Dictionary<Guid, UserDirectory> directories = await db.Directories.ToDictionaryAsync(d => d.Id, cancellationToken);
 
             List<IdentityDto> identities = (await db.DirectoryUsers.AsNoTracking()
@@ -58,6 +69,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
             return new AccountDetailDto(AccountDto.From(account, directories[account.DirectoryId].Name), identities, groups);
         }, cancellationToken: cancellationToken);
+    }
 
     public sealed record CreateAccountInput(string Username, string DisplayName, string? Email, string Password);
 
@@ -65,6 +77,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     [HttpPost]
     public async Task<AccountDto> Create([FromBody] CreateAccountInput input, CancellationToken cancellationToken)
     {
+        Ensure(await AbilityAsync(cancellationToken), "create", "Account");
         if (string.IsNullOrWhiteSpace(input.Username) || !System.Text.RegularExpressions.Regex.IsMatch(input.Username.Trim(), @"^[A-Za-z0-9._@-]{2,64}$"))
         {
             throw new UserFriendlyException("Usernames are 2–64 letters, digits, dots, dashes, underscores or @.");
@@ -117,10 +130,12 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
             throw new UserFriendlyException("You can't lock your own account.");
         }
 
+        Toda.Authz.Ability ability = await AbilityAsync(cancellationToken);
         (AccountDto dto, List<object> events) = await guardDb.RunAsync(async db =>
         {
             Account account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == id, cancellationToken)
                 ?? throw new EntityNotFoundException(typeof(Account), id);
+            Ensure(ability, locked ? "lock" : "unlock", account);
             account.LockedLocally = locked;
             await db.SaveChangesAsync(cancellationToken);
             List<object> events = await projector.RebuildAsync(db, [account.NormalizedUsername], cancellationToken);

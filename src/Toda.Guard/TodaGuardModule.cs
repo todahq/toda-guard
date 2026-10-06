@@ -65,13 +65,16 @@ public class TodaGuardModule : AbpModule
 
 public sealed class TodaAdminRequirement : IAuthorizationRequirement;
 
-/// <summary>Admin = effective member, directly or through any nesting, of the internal toda-admins group (by id, never by name).</summary>
-public sealed class TodaAdminHandler(IMembershipResolver memberships) : AuthorizationHandler<TodaAdminRequirement>
+/// <summary>
+/// Admin = may "manage" "all". Out of the box that comes from the Administrator role, granted to the
+/// internal toda-admins group (by id, never by name), so it follows group membership including nesting.
+/// </summary>
+public sealed class TodaAdminHandler(AbilityFactory abilities) : AuthorizationHandler<TodaAdminRequirement>
 {
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, TodaAdminRequirement requirement)
     {
         string? sub = context.User.FindFirst("sub")?.Value ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (Guid.TryParse(sub, out Guid accountId) && await memberships.IsMemberAsync(accountId, GuardConstants.AdminsGroupId))
+        if (Guid.TryParse(sub, out Guid accountId) && (await abilities.ForAccountAsync(accountId)).Can("manage", "all"))
         {
             context.Succeed(requirement);
         }

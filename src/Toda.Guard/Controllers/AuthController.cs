@@ -31,7 +31,10 @@ public class AuthController(AuthService auth, GuardDb guardDb, MembershipGraph g
 
     [HttpGet("me")]
     [Authorize]
-    public Task<object> Me(CancellationToken cancellationToken) => guardDb.RunAsync<object>(async db =>
+    public async Task<object> Me(CancellationToken cancellationToken)
+    {
+        Toda.Authz.Ability ability = await AbilityAsync(cancellationToken);
+        return await guardDb.RunAsync<object>(async db =>
     {
         Account account = await db.Accounts.FirstAsync(a => a.Id == CurrentAccountId, cancellationToken);
         Dictionary<Guid, string> directories = await db.Directories.ToDictionaryAsync(d => d.Id, d => d.Name, cancellationToken);
@@ -40,9 +43,12 @@ public class AuthController(AuthService auth, GuardDb guardDb, MembershipGraph g
         {
             account = AccountDto.From(account, directories.GetValueOrDefault(account.DirectoryId, "?")),
             groups = groups.Select(g => new EffectiveGroupDto(g.Group.Id, g.Group.Name, g.Group.DirectoryId, directories.GetValueOrDefault(g.Group.DirectoryId, "?"), g.Direct, g.Path)),
-            isAdmin = groups.Any(g => g.Group.Id == GuardConstants.AdminsGroupId),
+            isAdmin = ability.Can("manage", "all"),
+            // CASL raw rules for the browser (@toda/authz-casl): the UI hides what the server would refuse.
+            rules = ability.ToCaslRules(),
         };
     }, cancellationToken: cancellationToken);
+    }
 
     private static object Error(string code, string message) => new { error = new { code, message } };
 }
