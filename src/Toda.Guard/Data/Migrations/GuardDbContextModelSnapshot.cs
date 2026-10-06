@@ -259,12 +259,18 @@ namespace Toda.Guard.Data.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb");
 
+                    b.Property<string>("ScopeKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<DateTime?>("ValidUntil")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
                     b.HasIndex("RoleId");
+
+                    b.HasIndex("ScopeKey");
 
                     b.HasIndex("PrincipalType", "PrincipalId");
 

@@ -1,0 +1,195 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.EntityFrameworkCore;
+using Casl;
+using Toda.Guard.Domain;
+using Volo.Abp;
+using Volo.Abp.DependencyInjection;
+using Volo.Abp.Domain.Entities;
+
+namespace Toda.Guard.Services;
+
+/// <summary>A role other modules define in code, such as a project role contributed by a feature.</summary>
+public sealed record RoleDefinition(string Key, string Name, string? Description, IReadOnlyList<JsonObject> Rules);
+
+public sealed record GrantInfo(
+    Guid Id, Guid RoleId, string RoleKey, string RoleName, PrincipalType PrincipalType, Guid PrincipalId, string PrincipalName,
+    JsonObject Scope, string? ScopeKey, DateTime? ValidUntil, DateTime CreatedAt);
+
+/// <summary>
+/// Roles and grants for other modules (ADR 0010). Projects keep their roles here instead of in a second permission
+/// system: a project role is a system role whose rules use ${grant.projectId}, and a member is a grant with
+/// scope {"projectId": …} and scope key "project:{id}".
+/// </summary>
+public class RoleCatalog(GuardDb guardDb) : ITransientDependency
+{
+    public static readonly System.Text.RegularExpressions.Regex KeyPattern = new("^[a-z][a-z0-9-]{1,63}$");
+
+    /// <summary>Problems with one rule in CASL's raw format: subjects, fields, condition paths, operators.</summary>
+    public static IReadOnlyList<string> Problems(JsonObject rule)
+    {
+        try
+        {
+            return AbilityBuilder.Validate(RawRule.Parse(rule.ToJsonString()), GuardSubjects.Registry);
+        }
+        catch (JsonException ex)
+        {
+            return [ex.Message];
+        }
+    }
+
+    /// <summary>Throws unless the scope fills every ${grant.*} placeholder the rules use.</summary>
+    public static void EnsureScopeFits(IEnumerable<RawRule> rules, JsonObject scope)
+    {
+        try
+        {
+            _ = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options)
+                .WithVariables(new { user = new { id = Guid.Empty, username = "", directoryId = Guid.Empty, groupIds = Array.Empty<Guid>() } })
+                .AddRange(rules, new { grant = scope })
+                .Build();
+        }
+        catch (CaslConfigurationException ex)
+        {
+            throw new UserFriendlyException($"This scope doesn't fit the role's rules: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Creates a system role, or brings its name and rules up to date. Idempotent: running it again with the same
+    /// definition changes nothing. System roles can't be edited in the UI, so the code stays the source of truth.
+    /// </summary>
+    public Task<Guid> EnsureSystemRoleAsync(RoleDefinition definition, CancellationToken cancellationToken = default)
+    {
+        if (!KeyPattern.IsMatch(definition.Key))
+        {
+            throw new UserFriendlyException($"Role key '{definition.Key}' must be lowercase letters, digits and dashes.");
+        }
+
+        List<string> errors = definition.Rules.SelectMany((rule, i) => Problems(rule).Select(e => $"Role {definition.Key}, rule {i + 1}: {e}")).ToList();
+        if (errors.Count > 0)
+        {
+            throw new UserFriendlyException(string.Join(" ", errors));
+        }
+
+        return guardDb.RunAsync(async db =>
+        {
+            Role? role = await db.Roles.FirstOrDefaultAsync(r => r.Key == definition.Key, cancellationToken);
+            if (role is null)
+            {
+                role = new Role(Guid.NewGuid(), definition.Key, definition.Name, isSystem: true) { Description = definition.Description };
+                db.Roles.Add(role);
+            }
+            else
+            {
+                if (!role.IsSystem)
+                {
+                    throw new UserFriendlyException($"A role with key '{definition.Key}' already exists and was created by an admin.");
+                }
+
+                role.Name = definition.Name;
+                role.Description = definition.Description;
+            }
+
+            List<RoleRule> existing = await db.RoleRules.Where(r => r.RoleId == role.Id).OrderBy(r => r.Order).ToListAsync(cancellationToken);
+            List<string> wanted = definition.Rules.Select(r => r.ToJsonString()).ToList();
+            if (!existing.Select(r => r.Json).SequenceEqual(wanted, StringComparer.Ordinal)
+                && !existing.Select(r => Normalize(r.Json)).SequenceEqual(wanted.Select(Normalize), StringComparer.Ordinal))
+            {
+                db.RoleRules.RemoveRange(existing);
+                for (int i = 0; i < wanted.Count; i++)
+                {
+                    db.RoleRules.Add(new RoleRule(Guid.NewGuid(), role.Id, i, wanted[i]));
+                }
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            return role.Id;
+        }, cancellationToken: cancellationToken);
+    }
+
+    public Task<Guid?> FindRoleIdAsync(string key, CancellationToken cancellationToken = default) =>
+        guardDb.RunAsync(db => db.Roles.AsNoTracking().Where(r => r.Key == key).Select(r => (Guid?)r.Id).FirstOrDefaultAsync(cancellationToken),
+            cancellationToken: cancellationToken);
+
+    /// <summary>
+    /// Gives a role to an account or a group. Idempotent: the same role, principal and scope key returns the existing
+    /// grant. The scope must fill every placeholder of the role's rules.
+    /// </summary>
+    public Task<Guid> GrantAsync(
+        Guid roleId, PrincipalType principalType, Guid principalId, JsonObject scope, string? scopeKey,
+        DateTime? validUntil, Guid? createdBy, CancellationToken cancellationToken = default) =>
+        guardDb.RunAsync(async db =>
+        {
+            if (!await db.Roles.AnyAsync(r => r.Id == roleId, cancellationToken))
+            {
+                throw new EntityNotFoundException(typeof(Role), roleId);
+            }
+
+            bool principalExists = principalType == PrincipalType.Account
+                ? await db.Accounts.AnyAsync(a => a.Id == principalId, cancellationToken)
+                : await db.Groups.AnyAsync(g => g.Id == principalId, cancellationToken);
+            if (!principalExists)
+            {
+                throw new UserFriendlyException($"No {principalType} with id {principalId}.");
+            }
+
+            RoleGrant? same = await db.RoleGrants.FirstOrDefaultAsync(g =>
+                g.RoleId == roleId && g.PrincipalType == principalType && g.PrincipalId == principalId && g.ScopeKey == scopeKey, cancellationToken);
+            if (same is not null && scopeKey is not null)
+            {
+                return same.Id;
+            }
+
+            List<RawRule> rules = (await db.RoleRules.Where(r => r.RoleId == roleId).ToListAsync(cancellationToken)).Select(r => RawRule.Parse(r.Json)).ToList();
+            EnsureScopeFits(rules, scope);
+
+            RoleGrant grant = new(Guid.NewGuid(), roleId, principalType, principalId, scope.ToJsonString())
+            {
+                ScopeKey = scopeKey,
+                ValidUntil = validUntil,
+                CreatedBy = createdBy,
+            };
+            db.RoleGrants.Add(grant);
+            await db.SaveChangesAsync(cancellationToken);
+            return grant.Id;
+        }, cancellationToken: cancellationToken);
+
+    public Task RevokeAsync(Guid grantId, string? scopeKey = null, CancellationToken cancellationToken = default) =>
+        guardDb.RunAsync(async db =>
+        {
+            RoleGrant grant = await db.RoleGrants.FirstOrDefaultAsync(g => g.Id == grantId && (scopeKey == null || g.ScopeKey == scopeKey), cancellationToken)
+                ?? throw new EntityNotFoundException(typeof(RoleGrant), grantId);
+            if (grant.RoleId == GuardRoles.AdministratorId && grant.PrincipalId == GuardConstants.AdminsGroupId)
+            {
+                throw new UserFriendlyException("The Administrator grant to toda-admins can't be revoked; manage admins through that group.");
+            }
+
+            db.RoleGrants.Remove(grant);
+            await db.SaveChangesAsync(cancellationToken);
+        }, cancellationToken: cancellationToken);
+
+    /// <summary>Grants with this scope key, for example everyone with a role in one project.</summary>
+    public Task<List<GrantInfo>> ListGrantsAsync(string scopeKey, CancellationToken cancellationToken = default) =>
+        guardDb.RunAsync(async db =>
+        {
+            var rows = await (from g in db.RoleGrants.AsNoTracking()
+                              join r in db.Roles.AsNoTracking() on g.RoleId equals r.Id
+                              where g.ScopeKey == scopeKey
+                              orderby g.CreatedAt
+                              select new { Grant = g, r.Key, r.Name }).ToListAsync(cancellationToken);
+            List<Guid> ids = rows.Select(x => x.Grant.PrincipalId).Distinct().ToList();
+            Dictionary<Guid, string> names = await db.Accounts.AsNoTracking().Where(a => ids.Contains(a.Id)).ToDictionaryAsync(a => a.Id, a => a.DisplayName, cancellationToken);
+            foreach (var g in await db.Groups.AsNoTracking().Where(g => ids.Contains(g.Id)).Select(g => new { g.Id, g.Name }).ToListAsync(cancellationToken))
+            {
+                names[g.Id] = g.Name;
+            }
+
+            return rows.Select(x => new GrantInfo(
+                    x.Grant.Id, x.Grant.RoleId, x.Key, x.Name, x.Grant.PrincipalType, x.Grant.PrincipalId,
+                    names.GetValueOrDefault(x.Grant.PrincipalId, "(removed)"), JsonNode.Parse(x.Grant.ScopeJson) as JsonObject ?? [],
+                    x.Grant.ScopeKey, x.Grant.ValidUntil, x.Grant.CreatedAt))
+                .ToList();
+        }, cancellationToken: cancellationToken);
+
+    private static string Normalize(string json) => JsonNode.Parse(json)?.ToJsonString() ?? json;
+}

@@ -98,7 +98,9 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.ToTable("role_grants");
             b.Property(x => x.PrincipalType).HasConversion<string>().HasMaxLength(16);
             b.Property(x => x.ScopeJson).HasColumnType("jsonb").IsRequired();
+            b.Property(x => x.ScopeKey).HasMaxLength(128);
             b.HasIndex(x => new { x.PrincipalType, x.PrincipalId });
+            b.HasIndex(x => x.ScopeKey);
             b.HasIndex(x => x.RoleId);
         });
 

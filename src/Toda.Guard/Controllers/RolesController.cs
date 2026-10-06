@@ -15,7 +15,7 @@ namespace Toda.Guard.Controllers;
 /// <summary>Roles hold rules in CASL's format; grants give a role to an account or a group, with a scope.</summary>
 [Route("api/guard/roles")]
 [Authorize(Policy = TodaPolicies.Admin)]
-public class RolesController(GuardDb guardDb) : GuardControllerBase
+public class RolesController(GuardDb guardDb, RoleCatalog roleCatalog) : GuardControllerBase
 {
     public sealed record GrantDto(Guid Id, string PrincipalType, Guid PrincipalId, string PrincipalName, JsonNode? Scope, DateTime? ValidUntil, DateTime CreatedAt);
 
@@ -67,7 +67,7 @@ public class RolesController(GuardDb guardDb) : GuardControllerBase
     [HttpPost]
     public async Task<RoleDto> Create([FromBody] CreateRoleInput input, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(input.Key) || !System.Text.RegularExpressions.Regex.IsMatch(input.Key, "^[a-z][a-z0-9-]{1,63}$"))
+        if (string.IsNullOrWhiteSpace(input.Key) || !RoleCatalog.KeyPattern.IsMatch(input.Key))
         {
             throw new UserFriendlyException("Role keys are lowercase letters, digits and dashes.");
         }
@@ -107,75 +107,22 @@ public class RolesController(GuardDb guardDb) : GuardControllerBase
             throw new UserFriendlyException("principalType is Account or Group.");
         }
 
-        await guardDb.RunAsync(async db =>
-        {
-            if (!await db.Roles.AnyAsync(r => r.Id == roleId, cancellationToken))
-            {
-                throw new EntityNotFoundException(typeof(Role), roleId);
-            }
-
-            bool principalExists = principalType == PrincipalType.Account
-                ? await db.Accounts.AnyAsync(a => a.Id == input.PrincipalId, cancellationToken)
-                : await db.Groups.AnyAsync(g => g.Id == input.PrincipalId, cancellationToken);
-            if (!principalExists)
-            {
-                throw new UserFriendlyException($"No {principalType} with id {input.PrincipalId}.");
-            }
-
-            // The grant's scope must fill every ${grant.*} placeholder its role's rules use.
-            JsonObject scope = input.Scope ?? [];
-            List<RawRule> rules = (await db.RoleRules.Where(r => r.RoleId == roleId).ToListAsync(cancellationToken)).Select(r => RawRule.Parse(r.Json)).ToList();
-            try
-            {
-                _ = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options)
-                    .WithVariables(new { user = new { id = Guid.Empty, username = "", directoryId = Guid.Empty, groupIds = Array.Empty<Guid>() } })
-                    .AddRange(rules, new { grant = scope })
-                    .Build();
-            }
-            catch (CaslConfigurationException ex)
-            {
-                throw new UserFriendlyException($"This scope doesn't fit the role's rules: {ex.Message}");
-            }
-
-            db.RoleGrants.Add(new RoleGrant(Guid.NewGuid(), roleId, principalType, input.PrincipalId, scope.ToJsonString())
-            {
-                ValidUntil = input.ValidUntil,
-                CreatedBy = CurrentAccountId,
-            });
-            await db.SaveChangesAsync(cancellationToken);
-        }, requiresNew: true, cancellationToken);
-
+        await roleCatalog.GrantAsync(roleId, principalType, input.PrincipalId, input.Scope ?? [], scopeKey: null, input.ValidUntil, CurrentAccountId, cancellationToken);
         return (await List(cancellationToken)).Single(r => r.Id == roleId);
     }
 
     [HttpDelete("{roleId:guid}/grants/{grantId:guid}")]
     public async Task<NoContentResult> Revoke(Guid roleId, Guid grantId, CancellationToken cancellationToken)
     {
-        await guardDb.RunAsync(async db =>
+        bool belongs = await guardDb.RunAsync(db => db.RoleGrants.AnyAsync(g => g.Id == grantId && g.RoleId == roleId, cancellationToken), cancellationToken: cancellationToken);
+        if (!belongs)
         {
-            RoleGrant grant = await db.RoleGrants.FirstOrDefaultAsync(g => g.Id == grantId && g.RoleId == roleId, cancellationToken)
-                ?? throw new EntityNotFoundException(typeof(RoleGrant), grantId);
-            if (grant.RoleId == GuardRoles.AdministratorId && grant.PrincipalId == GuardConstants.AdminsGroupId)
-            {
-                throw new UserFriendlyException("The Administrator grant to toda-admins can't be revoked; manage admins through that group.");
-            }
+            throw new EntityNotFoundException(typeof(RoleGrant), grantId);
+        }
 
-            db.RoleGrants.Remove(grant);
-            await db.SaveChangesAsync(cancellationToken);
-        }, requiresNew: true, cancellationToken);
-
+        await roleCatalog.RevokeAsync(grantId, cancellationToken: cancellationToken);
         return NoContent();
     }
 
-    private static IReadOnlyList<string> Problems(JsonObject rule)
-    {
-        try
-        {
-            return AbilityBuilder.Validate(RawRule.Parse(rule.ToJsonString()), GuardSubjects.Registry);
-        }
-        catch (JsonException ex)
-        {
-            return [ex.Message];
-        }
-    }
+    private static IReadOnlyList<string> Problems(JsonObject rule) => RoleCatalog.Problems(rule);
 }

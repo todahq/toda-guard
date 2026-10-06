@@ -10,6 +10,9 @@ public sealed record GroupInfo(Guid Id, string Name, string? Description, Guid D
 public interface IAccountLookup
 {
     Task<AccountInfo?> GetAsync(Guid accountId, CancellationToken cancellationToken = default);
+
+    /// <summary>The accounts that exist among these ids; missing ids are left out.</summary>
+    Task<IReadOnlyDictionary<Guid, AccountInfo>> GetManyAsync(IEnumerable<Guid> accountIds, CancellationToken cancellationToken = default);
     Task<AccountInfo?> FindByUsernameAsync(string username, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AccountInfo>> SearchAsync(string text, int max = 20, CancellationToken cancellationToken = default);
 }

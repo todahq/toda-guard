@@ -78,6 +78,12 @@ public class RoleGrant : Entity<Guid>
     /// <summary>JSON object, e.g. {"directoryIds":["..."]}. Read by rules as ${grant.directoryIds}.</summary>
     public string ScopeJson { get; set; } = "{}";
 
+    /// <summary>
+    /// What the scope is about, for listing grants without reading JSON: for example "project:{id}" for a project
+    /// role. Null for grants that aren't tied to one object.
+    /// </summary>
+    public string? ScopeKey { get; set; }
+
     public DateTime? ValidUntil { get; set; }
     public DateTime CreatedAt { get; private set; }
     public Guid? CreatedBy { get; set; }

@@ -13,6 +13,19 @@ public class AccountLookup(GuardDb guardDb) : IAccountLookup, ITransientDependen
         guardDb.RunAsync(async db => (await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId, cancellationToken)) is { } a ? ToInfo(a) : null,
             cancellationToken: cancellationToken);
 
+    public Task<IReadOnlyDictionary<Guid, AccountInfo>> GetManyAsync(IEnumerable<Guid> accountIds, CancellationToken cancellationToken = default)
+    {
+        List<Guid> ids = accountIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyDictionary<Guid, AccountInfo>>(new Dictionary<Guid, AccountInfo>());
+        }
+
+        return guardDb.RunAsync<IReadOnlyDictionary<Guid, AccountInfo>>(async db =>
+            (await db.Accounts.AsNoTracking().Where(a => ids.Contains(a.Id)).ToListAsync(cancellationToken)).ToDictionary(a => a.Id, ToInfo),
+            cancellationToken: cancellationToken);
+    }
+
     public Task<AccountInfo?> FindByUsernameAsync(string username, CancellationToken cancellationToken = default)
     {
         string normalized = GuardConstants.Normalize(username);
