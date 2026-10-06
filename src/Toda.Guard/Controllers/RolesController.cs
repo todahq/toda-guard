@@ -127,7 +127,7 @@ public class RolesController(GuardDb guardDb) : GuardControllerBase
             List<RawRule> rules = (await db.RoleRules.Where(r => r.RoleId == roleId).ToListAsync(cancellationToken)).Select(r => RawRule.Parse(r.Json)).ToList();
             try
             {
-                _ = new AbilityBuilder(GuardSubjects.Registry)
+                _ = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options)
                     .WithVariables(new { user = new { id = Guid.Empty, username = "", directoryId = Guid.Empty, groupIds = Array.Empty<Guid>() } })
                     .AddRange(rules, new { grant = scope })
                     .Build();

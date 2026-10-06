@@ -19,6 +19,12 @@ public static class GuardSubjects
         .Add<RoleSubject>("Role")
         .Add<PluginSubject>("Plugin");
 
+    /// <summary>
+    /// Rules come from several roles and grants, so their order means nothing: any matching deny wins.
+    /// (CASL .NET's default is CASL's "last rule wins".)
+    /// </summary>
+    public static AbilityOptions Options { get; } = new() { Semantics = RuleSemantics.DenyOverrides };
+
     /// <summary>Marker types for subjects that only get type-level checks for now.</summary>
     public sealed class RoleSubject;
 
@@ -34,7 +40,7 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
 {
     private readonly Dictionary<Guid, Ability> _cache = [];
 
-    public static Ability None { get; } = new AbilityBuilder(GuardSubjects.Registry).Build();
+    public static Ability None { get; } = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options).Build();
 
     public async Task<Ability> ForAccountAsync(Guid accountId, CancellationToken cancellationToken = default)
     {
@@ -63,7 +69,7 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
                 .ToLookup(r => r.RoleId, r => RawRule.Parse(r.Json));
 
             object user = new { user = new { id = account.Id, username = account.Username, directoryId = account.DirectoryId, groupIds } };
-            AbilityBuilder builder = new AbilityBuilder(GuardSubjects.Registry).WithVariables(user);
+            AbilityBuilder builder = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options).WithVariables(user);
             foreach (RoleGrant grant in grants)
             {
                 object scope = new { grant = JsonNode.Parse(grant.ScopeJson) };
@@ -71,7 +77,7 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
                 try
                 {
                     // Check each grant on its own so one broken grant can't take down the others.
-                    _ = new AbilityBuilder(GuardSubjects.Registry).WithVariables(user).AddRange(grantRules, scope).Build();
+                    _ = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options).WithVariables(user).AddRange(grantRules, scope).Build();
                 }
                 catch (CaslConfigurationException ex)
                 {
