@@ -21,7 +21,7 @@ public sealed record GrantInfo(
 /// system: a project role is a system role whose rules use ${grant.projectId}, and a member is a grant with
 /// scope {"projectId": …} and scope key "project:{id}".
 /// </summary>
-public class RoleCatalog(GuardDb guardDb) : ITransientDependency
+public class RoleCatalog(GuardDb guardDb, MembershipGraph graph) : ITransientDependency
 {
     public static readonly System.Text.RegularExpressions.Regex KeyPattern = new("^[a-z][a-z0-9-]{1,63}$");
 
@@ -189,6 +189,28 @@ public class RoleCatalog(GuardDb guardDb) : ITransientDependency
                     names.GetValueOrDefault(x.Grant.PrincipalId, "(removed)"), JsonNode.Parse(x.Grant.ScopeJson) as JsonObject ?? [],
                     x.Grant.ScopeKey, x.Grant.ValidUntil, x.Grant.CreatedAt))
                 .ToList();
+        }, cancellationToken: cancellationToken);
+
+    /// <summary>Keys of the roles an account holds under a scope key, directly or through any of its groups.</summary>
+    public Task<HashSet<string>> RoleKeysAsync(Guid accountId, string scopeKey, CancellationToken cancellationToken = default) =>
+        guardDb.RunAsync(async db =>
+        {
+            Account? account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId, cancellationToken);
+            if (account is null || account.Status != AccountStatus.Active)
+            {
+                return new HashSet<string>();
+            }
+
+            List<Guid> groupIds = (await graph.GetEffectiveGroupsAsync(db, account, cancellationToken)).Select(g => g.Group.Id).ToList();
+            DateTime now = DateTime.UtcNow;
+            List<string> keys = await (from g in db.RoleGrants.AsNoTracking()
+                                       join r in db.Roles.AsNoTracking() on g.RoleId equals r.Id
+                                       where g.ScopeKey == scopeKey
+                                             && (g.ValidUntil == null || g.ValidUntil > now)
+                                             && ((g.PrincipalType == PrincipalType.Account && g.PrincipalId == accountId)
+                                                 || (g.PrincipalType == PrincipalType.Group && groupIds.Contains(g.PrincipalId)))
+                                       select r.Key).Distinct().ToListAsync(cancellationToken);
+            return keys.ToHashSet(StringComparer.Ordinal);
         }, cancellationToken: cancellationToken);
 
     private static string Normalize(string json) => JsonNode.Parse(json)?.ToJsonString() ?? json;
