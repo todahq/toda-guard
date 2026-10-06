@@ -23,17 +23,17 @@ public abstract class GuardControllerBase : AbpControllerBase
 
     protected string? ClientIp => HttpContext.Connection.RemoteIpAddress?.ToString();
 
-    protected Task<Toda.Authz.Ability> AbilityAsync(CancellationToken cancellationToken = default) =>
+    protected Task<Casl.Ability> AbilityAsync(CancellationToken cancellationToken = default) =>
         HttpContext.RequestServices.GetRequiredService<AbilityFactory>().ForAccountAsync(CurrentAccountId, cancellationToken);
 
     /// <summary>403 with the rule's reason when the ability denies the action on this object.</summary>
-    protected static void Ensure(Toda.Authz.Ability ability, string action, object subject, string? field = null)
+    protected static void Ensure(Casl.Ability ability, string action, object subject, string? field = null)
     {
         try
         {
             ability.EnsureCan(action, subject, field);
         }
-        catch (Toda.Authz.ForbiddenException ex)
+        catch (Casl.ForbiddenException ex)
         {
             // UserFriendlyException keeps the reason in the 403 body; ABP answers its authorization exception with an empty Forbid.
             throw new Volo.Abp.UserFriendlyException(ex.Message, "Toda:Forbidden");
@@ -41,7 +41,7 @@ public abstract class GuardControllerBase : AbpControllerBase
     }
 
     /// <summary>403 unless the user may do this to at least some instances of the subject.</summary>
-    protected static void Ensure(Toda.Authz.Ability ability, string action, string subject)
+    protected static void Ensure(Casl.Ability ability, string action, string subject)
     {
         if (!ability.Can(action, subject))
         {

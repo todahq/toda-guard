@@ -18,7 +18,7 @@
     <ProjectReference Include="..\Toda.Platform\Toda.Platform.csproj" />
     <ProjectReference Include="..\Toda.Guard.Contracts\Toda.Guard.Contracts.csproj" />
     <!-- The open-source authorization library, from its own repository next to this one. -->
-    <ProjectReference Include="..\..\..\toda-authz\src\Toda.Authz\Toda.Authz.csproj" />
+    <ProjectReference Include="..\..\..\casl-net\src\Casl.Net\Casl.Net.csproj" />
   </ItemGroup>
 
 </Project>

@@ -3,14 +3,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
-using Toda.Authz;
+using Casl;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities;
 
 namespace Toda.Guard.Controllers;
 
 /// <summary>
-/// Account APIs authorized row by row with Toda.Authz: the list is filtered in SQL with AccessibleBy, and each
+/// Account APIs authorized row by row with CASL .NET: the list is filtered in SQL with AccessibleBy, and each
 /// action is checked against the account it targets. Admins see everything through "manage all".
 /// </summary>
 [Route("api/guard/accounts")]
@@ -20,7 +20,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     [HttpGet]
     public async Task<List<AccountDto>> List([FromQuery] string? search, [FromQuery] string? status, CancellationToken cancellationToken)
     {
-        Toda.Authz.Ability ability = await AbilityAsync(cancellationToken);
+        Casl.Ability ability = await AbilityAsync(cancellationToken);
         Ensure(ability, "read", "Account");
         return await guardDb.RunAsync(async db =>
         {
@@ -46,7 +46,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     [HttpGet("{id:guid}")]
     public async Task<AccountDetailDto> Get(Guid id, CancellationToken cancellationToken)
     {
-        Toda.Authz.Ability ability = await AbilityAsync(cancellationToken);
+        Casl.Ability ability = await AbilityAsync(cancellationToken);
         return await guardDb.RunAsync(async db =>
         {
             Account account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, cancellationToken)
@@ -130,7 +130,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
             throw new UserFriendlyException("You can't lock your own account.");
         }
 
-        Toda.Authz.Ability ability = await AbilityAsync(cancellationToken);
+        Casl.Ability ability = await AbilityAsync(cancellationToken);
         (AccountDto dto, List<object> events) = await guardDb.RunAsync(async db =>
         {
             Account account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == id, cancellationToken)

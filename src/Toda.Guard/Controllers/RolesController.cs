@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Toda.Authz;
+using Casl;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
 using Toda.Platform.Controllers;
@@ -132,7 +132,7 @@ public class RolesController(GuardDb guardDb) : GuardControllerBase
                     .AddRange(rules, new { grant = scope })
                     .Build();
             }
-            catch (AuthzConfigurationException ex)
+            catch (CaslConfigurationException ex)
             {
                 throw new UserFriendlyException($"This scope doesn't fit the role's rules: {ex.Message}");
             }

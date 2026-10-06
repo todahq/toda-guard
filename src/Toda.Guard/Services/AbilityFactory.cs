@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Toda.Authz;
+using Casl;
 using Toda.Guard.Domain;
 using Volo.Abp.DependencyInjection;
 
@@ -73,7 +73,7 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
                     // Check each grant on its own so one broken grant can't take down the others.
                     _ = new AbilityBuilder(GuardSubjects.Registry).WithVariables(user).AddRange(grantRules, scope).Build();
                 }
-                catch (AuthzConfigurationException ex)
+                catch (CaslConfigurationException ex)
                 {
                     if (grantRules.Any(r => r.Inverted))
                     {
