@@ -105,7 +105,8 @@ public sealed record GroupDetailDto(GroupDto Group, List<GroupMemberDto> Members
 public sealed record DirectoryDto(
     Guid Id, string Name, string Type, string TypeDisplayName, int Order, bool IsActive, bool AuthenticationEnabled,
     Dictionary<string, string> Settings, int? SyncIntervalMinutes, DateTime? LastSyncAt, bool? LastSyncSucceeded,
-    string? LastSyncMessage, int UserCount, int GroupCount, bool ConnectorAvailable, string? PluginKey);
+    string? LastSyncMessage, int UserCount, int GroupCount, bool ConnectorAvailable, string? PluginKey,
+    bool SecretsReadable = true); // false: stored secrets can't be decrypted on this server; re-enter them
 
 public sealed record SyncRunDto(
     Guid Id, Guid DirectoryId, DateTime StartedAt, DateTime? FinishedAt, bool? Succeeded,

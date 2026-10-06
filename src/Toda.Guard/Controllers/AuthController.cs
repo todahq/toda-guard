@@ -8,27 +8,8 @@ using Toda.Guard.Services;
 namespace Toda.Guard.Controllers;
 
 [Route("api/guard")]
-public class AuthController(AuthService auth, GuardDb guardDb, MembershipGraph graph) : GuardControllerBase
+public class AuthController(GuardDb guardDb, MembershipGraph graph) : GuardControllerBase
 {
-    public sealed record LoginInput(string Username, string Password);
-
-    [HttpPost("auth/login")]
-    [AllowAnonymous]
-    public async Task<IActionResult> Login([FromBody] LoginInput input, CancellationToken cancellationToken)
-    {
-        LoginResult result = await auth.LoginAsync(input.Username ?? string.Empty, input.Password ?? string.Empty, ClientIp, cancellationToken);
-        if (!result.Succeeded)
-        {
-            return result.ErrorCode == "too_many_attempts"
-                ? StatusCode(StatusCodes.Status429TooManyRequests, Error("too_many_attempts", "Too many failed attempts. Try again in 15 minutes."))
-                : Unauthorized(Error("invalid_credentials", "The username or password is incorrect."));
-        }
-
-        string directoryName = await guardDb.RunAsync(db => db.Directories.Where(d => d.Id == result.Account!.DirectoryId).Select(d => d.Name).FirstAsync(cancellationToken),
-            cancellationToken: cancellationToken);
-        return Ok(new { accessToken = result.Token, expiresAt = result.ExpiresAt, account = AccountDto.From(result.Account!, directoryName) });
-    }
-
     [HttpGet("me")]
     [Authorize]
     public async Task<object> Me(CancellationToken cancellationToken)

@@ -1,9 +1,13 @@
-using System.Text;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
+using Toda.Guard.Controllers;
+using OpenIddict.Abstractions;
+using OpenIddict.Server.AspNetCore;
+using OpenIddict.Validation.AspNetCore;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Toda.Guard.Directories;
@@ -30,20 +34,49 @@ public class TodaGuardModule : AbpModule
             options.Configure<GuardDbContext>(c => c.UseNpgsql(npgsql =>
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", GuardDbContext.Schema))));
 
-        context.Services
-            .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer(options =>
+        // Sign-in: OpenIddict issues short-lived access tokens and rotating refresh tokens to the
+        // first-party Next.js server; APIs validate them locally (ADR 0007).
+        string contentRoot = context.Services.GetHostingEnvironment().ContentRootPath;
+        string keysFolder = Path.GetFullPath(Path.Combine(contentRoot, configuration["Guard:Oidc:KeysPath"] ?? "App_Data/oidc-keys"));
+        (SecurityKey signingKey, SecurityKey encryptionKey) = OidcKeys.LoadOrCreate(keysFolder);
+
+        context.Services.AddDbContext<OidcDbContext>(options =>
+        {
+            options.UseNpgsql(configuration.GetConnectionString("Default"),
+                npgsql => npgsql.MigrationsHistoryTable(OidcDbContext.HistoryTable, GuardDbContext.Schema));
+            options.UseOpenIddict<Guid>();
+        });
+
+        context.Services.AddOpenIddict()
+            .AddCore(options => options.UseEntityFrameworkCore().UseDbContext<OidcDbContext>().ReplaceDefaultEntities<Guid>())
+            .AddServer(options =>
             {
-                options.MapInboundClaims = false;
-                options.TokenValidationParameters = new TokenValidationParameters
+                options.SetTokenEndpointUris("connect/token")
+                    .SetRevocationEndpointUris("connect/revoke");
+                options.AllowPasswordFlow().AllowRefreshTokenFlow();
+                options.RegisterScopes(OpenIddictConstants.Scopes.OfflineAccess, GuardOidc.ApiScope);
+                options.SetAccessTokenLifetime(TimeSpan.FromMinutes(15))
+                    .SetRefreshTokenLifetime(TimeSpan.FromDays(14))
+                    .SetRefreshTokenReuseLeeway(TimeSpan.FromSeconds(30));
+                options.AddSigningKey(signingKey).AddEncryptionKey(encryptionKey);
+                if (configuration["Guard:Oidc:Issuer"] is { Length: > 0 } issuer)
                 {
-                    ValidIssuer = configuration["Guard:Jwt:Issuer"] ?? "toda",
-                    ValidAudience = configuration["Guard:Jwt:Audience"] ?? "toda",
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
-                        configuration["Guard:Jwt:SigningKey"] ?? throw new InvalidOperationException("Guard:Jwt:SigningKey is not configured."))),
-                    NameClaimType = "unique_name",
-                };
+                    options.SetIssuer(new Uri(issuer));
+                }
+
+                OpenIddictServerAspNetCoreBuilder aspNetCore = options.UseAspNetCore().EnableTokenEndpointPassthrough();
+                if (configuration.GetValue("Guard:Oidc:AllowHttp", false))
+                {
+                    aspNetCore.DisableTransportSecurityRequirement();
+                }
+            })
+            .AddValidation(options =>
+            {
+                options.UseLocalServer();
+                options.UseAspNetCore();
             });
+
+        context.Services.AddAuthentication(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
 
         context.Services.AddAuthorization(options =>
             options.AddPolicy(TodaPolicies.Admin, policy => policy.RequireAuthenticatedUser().AddRequirements(new TodaAdminRequirement())));

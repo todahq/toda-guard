@@ -1,11 +1,6 @@
 using System.Collections.Concurrent;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using Microsoft.IdentityModel.Tokens;
 using Toda.Guard.Data;
 using Toda.Guard.Directories;
 using Toda.Guard.Domain;
@@ -57,13 +52,13 @@ public class LoginRateLimiter : ISingletonDependency
     }
 }
 
-public sealed record LoginResult(bool Succeeded, string? Token, DateTime? ExpiresAt, Account? Account, string? ErrorCode);
+/// <summary>Credential check only. Tokens are issued by the OpenIddict token endpoint (ADR 0007).</summary>
+public sealed record LoginResult(bool Succeeded, Account? Account, string? ErrorCode);
 
 public class AuthService(
     GuardDb guardDb,
     ConnectorCatalog connectors,
-    LoginRateLimiter limiter,
-    IConfiguration configuration) : ITransientDependency
+    LoginRateLimiter limiter) : ITransientDependency
 {
     private static readonly PasswordHasher<DirectoryUser> Hasher = new();
 
@@ -75,7 +70,7 @@ public class AuthService(
         if (limiter.IsBlocked(normalized, ip))
         {
             await AuditAsync("auth.login.blocked", normalized, null, "Too many failed attempts", ip, cancellationToken);
-            return new LoginResult(false, null, null, null, "too_many_attempts");
+            return new LoginResult(false, null, "too_many_attempts");
         }
 
         (bool ok, Account? account, string reason) = await guardDb.RunAsync(async db =>
@@ -125,13 +120,12 @@ public class AuthService(
             }
 
             await AuditAsync("auth.login.failed", normalized, account?.Id, reason, ip, cancellationToken);
-            return new LoginResult(false, null, null, null, "invalid_credentials");
+            return new LoginResult(false, null, "invalid_credentials");
         }
 
         limiter.Reset(normalized);
         await AuditAsync("auth.login.succeeded", normalized, account!.Id, null, ip, cancellationToken);
-        (string token, DateTime expires) = IssueToken(account);
-        return new LoginResult(true, token, expires, account, null);
+        return new LoginResult(true, account, null);
     }
 
     public async Task<(bool Succeeded, string? Error)> AuthenticateAsync(UserDirectory directory, DirectoryUser record, string password)
@@ -153,27 +147,6 @@ public class AuthService(
             ConnectorAuthResult result = await connector.AuthenticateAsync(connectors.BuildContext(directory), record.Username, password, CancellationToken.None);
             return (result.Succeeded, result.Succeeded ? null : result.Error ?? "wrong_password");
         });
-    }
-
-    public (string Token, DateTime ExpiresAt) IssueToken(Account account)
-    {
-        string key = configuration["Guard:Jwt:SigningKey"]
-            ?? throw new InvalidOperationException("Guard:Jwt:SigningKey is not configured.");
-        DateTime expires = DateTime.UtcNow.AddHours(8);
-        JwtSecurityToken token = new(
-            issuer: configuration["Guard:Jwt:Issuer"] ?? "toda",
-            audience: configuration["Guard:Jwt:Audience"] ?? "toda",
-            claims:
-            [
-                new Claim(JwtRegisteredClaimNames.Sub, account.Id.ToString()),
-                new Claim(ClaimTypes.NameIdentifier, account.Id.ToString()),
-                new Claim(JwtRegisteredClaimNames.UniqueName, account.Username),
-                new Claim(ClaimTypes.Name, account.Username),
-                new Claim("display_name", account.DisplayName),
-            ],
-            expires: expires,
-            signingCredentials: new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)), SecurityAlgorithms.HmacSha256));
-        return (new JwtSecurityTokenHandler().WriteToken(token), expires);
     }
 
     public Task AuditAsync(string type, string? username, Guid? accountId, string? detail, string? ip, CancellationToken cancellationToken = default) =>

@@ -306,7 +306,8 @@ public class DirectoriesController(
         {
             ConnectorDescription? connector = available.FirstOrDefault(c => c.Type == d.Type);
             Dictionary<string, string> settings = JsonSerializer.Deserialize<Dictionary<string, string>>(d.SettingsJson) ?? new();
-            foreach (string secretName in secrets.Unprotect(d.ProtectedSecrets).Keys)
+            bool secretsReadable = secrets.TryUnprotect(d.ProtectedSecrets, out Dictionary<string, string> stored);
+            foreach (string secretName in stored.Keys)
             {
                 settings[secretName] = DirectorySecrets.Mask;
             }
@@ -315,7 +316,7 @@ public class DirectoriesController(
                 d.Id, d.Name, d.Type, d.IsInternal ? "Internal" : connector?.DisplayName ?? d.Type, d.Order, d.IsActive, d.AuthenticationEnabled,
                 settings, d.SyncIntervalMinutes, d.LastSyncAt, d.LastSyncSucceeded, d.LastSyncMessage,
                 userCounts.GetValueOrDefault(d.Id), groupCounts.GetValueOrDefault(d.Id),
-                d.IsInternal || connector is not null, connector?.PluginKey);
+                d.IsInternal || connector is not null, connector?.PluginKey, secretsReadable);
         }).ToList();
     }
 }

@@ -21,9 +21,30 @@ public class DirectorySecrets(IDataProtectionProvider dataProtection) : ISinglet
         secrets.Count == 0 ? null : _protector.Protect(JsonSerializer.Serialize(secrets));
 
     public Dictionary<string, string> Unprotect(string? protectedSecrets) =>
-        string.IsNullOrEmpty(protectedSecrets)
-            ? new Dictionary<string, string>()
-            : JsonSerializer.Deserialize<Dictionary<string, string>>(_protector.Unprotect(protectedSecrets)) ?? new();
+        TryUnprotect(protectedSecrets, out Dictionary<string, string> secrets) ? secrets : new Dictionary<string, string>();
+
+    /// <summary>
+    /// False when the stored secrets can't be decrypted, for example after the data-protection keys were lost
+    /// or the database was restored on another server. Callers carry on without the secrets; the admin re-enters them.
+    /// </summary>
+    public bool TryUnprotect(string? protectedSecrets, out Dictionary<string, string> secrets)
+    {
+        secrets = new Dictionary<string, string>();
+        if (string.IsNullOrEmpty(protectedSecrets))
+        {
+            return true;
+        }
+
+        try
+        {
+            secrets = JsonSerializer.Deserialize<Dictionary<string, string>>(_protector.Unprotect(protectedSecrets)) ?? new();
+            return true;
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            return false;
+        }
+    }
 }
 
 /// <summary>Finds the connector for a directory type among core and plugin-provided extensions.</summary>
