@@ -91,6 +91,7 @@ public class TodaGuardModule : AbpModule
         {
             options.Expose<IAccountLookup>();
             options.Expose<IMembershipResolver>();
+            options.Expose<IAccountProvisioning>();
             options.Expose<IDirectoryConnectionProvider>((hostScope, plugin) => new PluginDirectoryConnectionProvider(hostScope, plugin.Key));
         });
     }

@@ -34,3 +34,23 @@ public interface IDirectoryConnectionProvider
 {
     Task<IReadOnlyList<Directories.DirectoryConnectionContext>> GetConnectionsAsync(CancellationToken cancellationToken = default);
 }
+
+/// <summary>How an importer's person was matched to an account (ADR 0012).</summary>
+public sealed record ProvisionedAccount(Guid AccountId, string MatchedBy);
+
+/// <summary>
+/// For importers: find the account for a person from another system, or create a deactivated placeholder in an
+/// "Imported from {source}" directory (sign-in off). If the same username later comes from a directory that ranks
+/// higher, directory precedence moves the account there, keeping its id and history.
+/// </summary>
+public interface IAccountProvisioning
+{
+    /// <summary>MatchedBy is "username", "email" or "placeholder".</summary>
+    Task<ProvisionedAccount> MatchOrCreatePlaceholderAsync(string source, string username, string? displayName, string? email, CancellationToken cancellationToken = default);
+}
+
+public static class GuardWellKnown
+{
+    /// <summary>The internal toda-admins group: its effective members are site admins.</summary>
+    public static readonly Guid AdminsGroupId = Guid.Parse("00000000-0000-0000-0000-00000000a001");
+}
