@@ -17,6 +17,18 @@ public interface IAccountLookup
     Task<IReadOnlyList<AccountInfo>> SearchAsync(string text, int max = 20, CancellationToken cancellationToken = default);
 }
 
+/// <summary>Groups by id or name, for fields that hold a group (a record's assignee group).</summary>
+public interface IGroupLookup
+{
+    /// <summary>The groups that exist among these ids; missing ids are left out.</summary>
+    Task<IReadOnlyDictionary<Guid, GroupInfo>> GetManyAsync(IEnumerable<Guid> groupIds, CancellationToken cancellationToken = default);
+
+    /// <summary>A group by id, or every group with this name (two directories may each have one).</summary>
+    Task<IReadOnlyList<GroupInfo>> FindAsync(string idOrName, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<GroupInfo>> SearchAsync(string text, int max = 20, CancellationToken cancellationToken = default);
+}
+
 public interface IMembershipResolver
 {
     /// <summary>True if the account is in the group directly or through nested groups.</summary>

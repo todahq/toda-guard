@@ -48,6 +48,48 @@ public class AccountLookup(GuardDb guardDb) : IAccountLookup, ITransientDependen
     internal static AccountInfo ToInfo(Account a) => new(a.Id, a.Username, a.DisplayName, a.Email, a.Status == AccountStatus.Active, a.DirectoryId);
 }
 
+[ExposeServices(typeof(IGroupLookup))]
+public class GroupLookup(GuardDb guardDb) : IGroupLookup, ITransientDependency
+{
+    public Task<IReadOnlyDictionary<Guid, GroupInfo>> GetManyAsync(IEnumerable<Guid> groupIds, CancellationToken cancellationToken = default)
+    {
+        List<Guid> ids = groupIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyDictionary<Guid, GroupInfo>>(new Dictionary<Guid, GroupInfo>());
+        }
+
+        return guardDb.RunAsync<IReadOnlyDictionary<Guid, GroupInfo>>(async db =>
+            (await db.Groups.AsNoTracking().Where(g => ids.Contains(g.Id)).ToListAsync(cancellationToken)).ToDictionary(g => g.Id, ToInfo),
+            cancellationToken: cancellationToken);
+    }
+
+    public Task<IReadOnlyList<GroupInfo>> FindAsync(string idOrName, CancellationToken cancellationToken = default)
+    {
+        string normalized = GuardConstants.Normalize(idOrName);
+        bool byId = Guid.TryParse(idOrName, out Guid id);
+        return guardDb.RunAsync<IReadOnlyList<GroupInfo>>(async db => (await db.Groups.AsNoTracking()
+                .Where(g => byId ? g.Id == id : g.NormalizedName == normalized)
+                .ToListAsync(cancellationToken))
+            .Select(ToInfo)
+            .ToList(), cancellationToken: cancellationToken);
+    }
+
+    public Task<IReadOnlyList<GroupInfo>> SearchAsync(string text, int max = 20, CancellationToken cancellationToken = default)
+    {
+        string normalized = GuardConstants.Normalize(text);
+        return guardDb.RunAsync<IReadOnlyList<GroupInfo>>(async db => (await db.Groups.AsNoTracking()
+                .Where(g => g.NormalizedName.Contains(normalized))
+                .OrderBy(g => g.Name)
+                .Take(max)
+                .ToListAsync(cancellationToken))
+            .Select(ToInfo)
+            .ToList(), cancellationToken: cancellationToken);
+    }
+
+    internal static GroupInfo ToInfo(Group g) => new(g.Id, g.Name, g.Description, g.DirectoryId);
+}
+
 [ExposeServices(typeof(IMembershipResolver))]
 public class MembershipResolver(GuardDb guardDb, MembershipGraph graph) : IMembershipResolver, ITransientDependency
 {
