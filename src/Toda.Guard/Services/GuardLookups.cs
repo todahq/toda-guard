@@ -67,6 +67,27 @@ public class MembershipResolver(GuardDb guardDb, MembershipGraph graph) : IMembe
                 .Select(g => new GroupInfo(g.Group.Id, g.Group.Name, g.Group.Description, g.Group.DirectoryId))
                 .ToList();
         }, cancellationToken: cancellationToken);
+
+    public Task<IReadOnlyList<Guid>?> GetEffectiveMemberIdsAsync(string groupIdOrName, CancellationToken cancellationToken = default) =>
+        guardDb.RunAsync<IReadOnlyList<Guid>?>(async db =>
+        {
+            string normalized = GuardConstants.Normalize(groupIdOrName);
+            List<Guid> groups = Guid.TryParse(groupIdOrName, out Guid id)
+                ? await db.Groups.AsNoTracking().Where(g => g.Id == id).Select(g => g.Id).ToListAsync(cancellationToken)
+                : await db.Groups.AsNoTracking().Where(g => g.NormalizedName == normalized).Select(g => g.Id).ToListAsync(cancellationToken);
+            if (groups.Count == 0)
+            {
+                return null;
+            }
+
+            HashSet<Guid> members = [];
+            foreach (Guid group in groups)
+            {
+                members.UnionWith((await graph.GetEffectiveMembersAsync(db, group, cancellationToken)).Select(m => m.Account.Id));
+            }
+
+            return members.ToList();
+        }, cancellationToken: cancellationToken);
 }
 
 /// <summary>Built per plugin: only hands out directories of the connector types that plugin registered.</summary>

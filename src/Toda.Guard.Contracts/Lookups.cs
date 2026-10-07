@@ -24,6 +24,12 @@ public interface IMembershipResolver
 
     /// <summary>All groups the account belongs to, including through nesting.</summary>
     Task<IReadOnlyList<GroupInfo>> GetEffectiveGroupsAsync(Guid accountId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The active accounts in a group, directly or through nested groups. The group by id or by name; a name several
+    /// directories use means all of those groups. Null when there's no such group.
+    /// </summary>
+    Task<IReadOnlyList<Guid>?> GetEffectiveMemberIdsAsync(string groupIdOrName, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
