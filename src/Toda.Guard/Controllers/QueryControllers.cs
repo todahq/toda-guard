@@ -70,7 +70,7 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
         Dictionary<string, Guid> byName = directories.ToDictionary(d => d.Value, d => d.Key, StringComparer.OrdinalIgnoreCase);
         return new EntityField<T>
         {
-            Definition = new("directory", FieldKind.Choice, "Directory", "الدليل", Sortable: true, Groupable: true, Nullable: false),
+            Definition = new("directory", FieldKind.Choice, "Directory", FieldLabels.Ar("الدليل"), Sortable: true, Groupable: true, Nullable: false),
             Member = member,
             Choices = directories.Values.Distinct(StringComparer.OrdinalIgnoreCase).ToDictionary(n => n, n => n),
             ChoiceValue = name => byName[name],
@@ -80,17 +80,17 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
 
     private static async Task<EntityQueryModel<Account>> AccountModelAsync(GuardDbContext db, CancellationToken ct) => new(
     [
-        new() { Definition = new("username", FieldKind.Text, "Username", "اسم المستخدم", Sortable: true, Nullable: false), Member = (Expression<Func<Account, string>>)(a => a.Username) },
-        new() { Definition = new("displayName", FieldKind.Text, "Display name", "الاسم المعروض", Sortable: true, Nullable: false), Member = (Expression<Func<Account, string>>)(a => a.DisplayName) },
-        new() { Definition = new("email", FieldKind.Text, "Email", "البريد الإلكتروني", Sortable: true), Member = (Expression<Func<Account, string?>>)(a => a.Email) },
+        new() { Definition = new("username", FieldKind.Text, "Username", FieldLabels.Ar("اسم المستخدم"), Sortable: true, Nullable: false), Member = (Expression<Func<Account, string>>)(a => a.Username) },
+        new() { Definition = new("displayName", FieldKind.Text, "Display name", FieldLabels.Ar("الاسم المعروض"), Sortable: true, Nullable: false), Member = (Expression<Func<Account, string>>)(a => a.DisplayName) },
+        new() { Definition = new("email", FieldKind.Text, "Email", FieldLabels.Ar("البريد الإلكتروني"), Sortable: true), Member = (Expression<Func<Account, string?>>)(a => a.Email) },
         await DirectoryAsync<Account>(db, a => a.DirectoryId, a => a.DirectoryId, ct),
         new()
         {
-            Definition = new("status", FieldKind.Choice, "Status", "الحالة", Sortable: true, Groupable: true, Nullable: false),
+            Definition = new("status", FieldKind.Choice, "Status", FieldLabels.Ar("الحالة"), Sortable: true, Groupable: true, Nullable: false),
             Member = (Expression<Func<Account, AccountStatus>>)(a => a.Status),
             Choices = new Dictionary<string, string> { ["active"] = "Active", ["inactive"] = "Inactive", ["locked"] = "Locked" },
         },
-        new() { Definition = new("lastSignIn", FieldKind.DateTime, "Last sign-in", "آخر تسجيل دخول", Sortable: true), Member = (Expression<Func<Account, DateTime?>>)(a => a.LastLoginAt) },
+        new() { Definition = new("lastSignIn", FieldKind.DateTime, "Last sign-in", FieldLabels.Ar("آخر تسجيل دخول"), Sortable: true), Member = (Expression<Func<Account, DateTime?>>)(a => a.LastLoginAt) },
     ], ["username", "displayName", "email", "directory", "status", "lastSignIn"], a => a.Id, a => a.Username, (Expression<Func<Account, string>>)(a => a.Username));
 
     private static async Task<EntityQueryModel<Group>> GroupModelAsync(GuardDbContext db, CancellationToken ct)
@@ -111,19 +111,19 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
 
         return new(
         [
-            new() { Definition = new("name", FieldKind.Text, "Name", "الاسم", Sortable: true, Nullable: false), Member = (Expression<Func<Group, string>>)(g => g.Name) },
-            new() { Definition = new("description", FieldKind.Text, "Description", "الوصف"), Member = (Expression<Func<Group, string?>>)(g => g.Description) },
+            new() { Definition = new("name", FieldKind.Text, "Name", FieldLabels.Ar("الاسم"), Sortable: true, Nullable: false), Member = (Expression<Func<Group, string>>)(g => g.Name) },
+            new() { Definition = new("description", FieldKind.Text, "Description", FieldLabels.Ar("الوصف")), Member = (Expression<Func<Group, string?>>)(g => g.Description) },
             await DirectoryAsync<Group>(db, g => g.DirectoryId, g => g.DirectoryId, ct),
             new()
             {
-                Definition = new("source", FieldKind.Choice, "Source", "المصدر", Sortable: true, Groupable: true, Nullable: false),
+                Definition = new("source", FieldKind.Choice, "Source", FieldLabels.Ar("المصدر"), Sortable: true, Groupable: true, Nullable: false),
                 Member = (Expression<Func<Group, bool>>)(g => g.IsLocal),
                 Choices = new Dictionary<string, string> { ["local"] = "Local", ["directory"] = "From the directory" },
                 ChoiceValue = key => key.Equals("local", StringComparison.OrdinalIgnoreCase),
                 Display = g => g.IsLocal ? "local" : "directory",
             },
-            new() { Definition = new("members", FieldKind.Number, "Direct members", "الأعضاء المباشرون", Sortable: true, Nullable: false), Member = members, Load = (rows, t) => CountAsync(rows, false, t) },
-            new() { Definition = new("memberGroups", FieldKind.Number, "Member groups", "المجموعات الأعضاء", Sortable: true, Nullable: false), Member = memberGroups, Load = (rows, t) => CountAsync(rows, true, t) },
+            new() { Definition = new("members", FieldKind.Number, "Direct members", FieldLabels.Ar("الأعضاء المباشرون"), Sortable: true, Nullable: false), Member = members, Load = (rows, t) => CountAsync(rows, false, t) },
+            new() { Definition = new("memberGroups", FieldKind.Number, "Member groups", FieldLabels.Ar("المجموعات الأعضاء"), Sortable: true, Nullable: false), Member = memberGroups, Load = (rows, t) => CountAsync(rows, true, t) },
         ], ["name", "description", "directory", "source", "members", "memberGroups"], g => g.Id, g => g.Name, (Expression<Func<Group, string>>)(g => g.Name));
     }
 }
