@@ -36,7 +36,7 @@ public static class GuardSubjects
 /// groups (nested groups count). Each grant's scope fills that grant's ${grant.*} placeholders.
 /// Built once per request.
 /// </summary>
-public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<AbilityFactory> logger) : IScopedDependency
+public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<AbilityFactory> logger, IEnumerable<IGrantScopeExpander> expanders) : IScopedDependency
 {
     private readonly Dictionary<Guid, Ability> _cache = [];
 
@@ -65,15 +65,40 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
                 .Where(g => g.ValidUntil == null || g.ValidUntil > now)
                 .ToListAsync(cancellationToken);
             List<Guid> roleIds = grants.Select(g => g.RoleId).Distinct().ToList();
-            ILookup<Guid, RawRule> rules = (await db.RoleRules.AsNoTracking().Where(r => roleIds.Contains(r.RoleId)).OrderBy(r => r.Order).ToListAsync(cancellationToken))
-                .ToLookup(r => r.RoleId, r => RawRule.Parse(r.Json));
+            ILookup<Guid, string> ruleJson = (await db.RoleRules.AsNoTracking().Where(r => roleIds.Contains(r.RoleId)).OrderBy(r => r.Order).ToListAsync(cancellationToken))
+                .ToLookup(r => r.RoleId, r => r.Json);
+            ILookup<Guid, RawRule> rules = ruleJson.SelectMany(g => g.Select(j => (g.Key, Rule: RawRule.Parse(j)))).ToLookup(x => x.Key, x => x.Rule);
+            // Read-only copies are only needed when a grant reaches up the project tree (ADR 0033); built on first use.
+            ILookup<Guid, RawRule>? readRules = null;
+            ILookup<Guid, RawRule> ReadRules() => readRules ??= ruleJson
+                .SelectMany(g => g.Select(ReadOnly).OfType<string>().Select(j => (g.Key, Rule: RawRule.Parse(j)))).ToLookup(x => x.Key, x => x.Rule);
 
             object user = new { user = new { id = account.Id, username = account.Username, directoryId = account.DirectoryId, groupIds } };
             AbilityBuilder builder = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options).WithVariables(user);
+            // Each grant applies in its own scope, and in any scope a module widens it to (ADR 0033).
+            List<(RoleGrant Grant, JsonObject Scope, bool ReadOnly)> applied = [];
             foreach (RoleGrant grant in grants)
             {
-                object scope = new { grant = JsonNode.Parse(grant.ScopeJson) };
-                List<RawRule> grantRules = rules[grant.RoleId].ToList();
+                JsonObject own = JsonNode.Parse(grant.ScopeJson) as JsonObject ?? [];
+                applied.Add((grant, own, false));
+                foreach (IGrantScopeExpander expander in expanders)
+                {
+                    foreach (GrantExpansion expansion in await expander.ExpandAsync(own, cancellationToken))
+                    {
+                        applied.Add((grant, expansion.Scope, expansion.ReadOnly));
+                    }
+                }
+            }
+
+            foreach ((RoleGrant grant, JsonObject grantScope, bool readOnly) in applied)
+            {
+                object scope = new { grant = grantScope };
+                List<RawRule> grantRules = (readOnly ? ReadRules() : rules)[grant.RoleId].ToList();
+                if (grantRules.Count == 0)
+                {
+                    continue;
+                }
+
                 try
                 {
                     // Check each grant on its own so one broken grant can't take down the others.
@@ -100,5 +125,31 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
 
         _cache[accountId] = ability;
         return ability;
+    }
+
+    /// <summary>
+    /// A rule narrowed to reading: its actions become "read" when it allows (or denies) reading or managing; any other
+    /// rule is dropped. Used where a grant reaches further than where it was given, for reading only.
+    /// </summary>
+    internal static string? ReadOnly(string json)
+    {
+        if (JsonNode.Parse(json) is not JsonObject rule)
+        {
+            return null;
+        }
+
+        IEnumerable<string> actions = rule["action"] switch
+        {
+            JsonArray list => list.Select(a => a?.GetValue<string>() ?? ""),
+            JsonValue one => [one.GetValue<string>()],
+            _ => [],
+        };
+        if (!actions.Any(a => a is "read" or "manage"))
+        {
+            return null;
+        }
+
+        rule["action"] = "read";
+        return rule.ToJsonString();
     }
 }

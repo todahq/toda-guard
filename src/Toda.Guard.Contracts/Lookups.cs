@@ -72,3 +72,19 @@ public static class GuardWellKnown
     /// <summary>The internal toda-admins group: its effective members are site admins.</summary>
     public static readonly Guid AdminsGroupId = Guid.Parse("00000000-0000-0000-0000-00000000a001");
 }
+
+/// <summary>
+/// A scope a grant's rules also apply in (ADR 0033): with all its rules, or with its read rules only (actions narrowed
+/// to read, deny rules kept).
+/// </summary>
+public sealed record GrantExpansion(System.Text.Json.Nodes.JsonObject Scope, bool ReadOnly);
+
+/// <summary>
+/// Lets a module widen grants without guard knowing its model: a role granted on a project also applies to the
+/// projects under it, and lets its holders read the ones above (ADR 0033). Called for every grant each time an ability
+/// is built, so answers must come from memory.
+/// </summary>
+public interface IGrantScopeExpander
+{
+    ValueTask<IReadOnlyList<GrantExpansion>> ExpandAsync(System.Text.Json.Nodes.JsonObject scope, CancellationToken cancellationToken = default);
+}
