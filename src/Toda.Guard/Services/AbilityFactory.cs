@@ -68,18 +68,31 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
             ILookup<Guid, string> ruleJson = (await db.RoleRules.AsNoTracking().Where(r => roleIds.Contains(r.RoleId)).OrderBy(r => r.Order).ToListAsync(cancellationToken))
                 .ToLookup(r => r.RoleId, r => r.Json);
             ILookup<Guid, RawRule> rules = ruleJson.SelectMany(g => g.Select(j => (g.Key, Rule: RawRule.Parse(j)))).ToLookup(x => x.Key, x => x.Rule);
-            // Read-only copies are only needed when a grant reaches up the project tree (ADR 0033); built on first use.
-            ILookup<Guid, RawRule>? readRules = null;
-            ILookup<Guid, RawRule> ReadRules() => readRules ??= ruleJson
-                .SelectMany(g => g.Select(ReadOnly).OfType<string>().Select(j => (g.Key, Rule: RawRule.Parse(j)))).ToLookup(x => x.Key, x => x.Rule);
+
+            // Rules for a widened scope (ADR 0033), made once per role, read-only or not, and list-valued placeholders.
+            Dictionary<(Guid Role, bool ReadOnly, string Lists), List<RawRule>> widened = [];
+            List<RawRule> Widened(Guid role, bool readOnly, JsonObject scope)
+            {
+                HashSet<string> lists = scope.Where(p => p.Value is JsonArray).Select(p => p.Key).ToHashSet(StringComparer.Ordinal);
+                (Guid, bool, string) key = (role, readOnly, string.Join(",", lists.Order(StringComparer.Ordinal)));
+                if (!widened.TryGetValue(key, out List<RawRule>? found))
+                {
+                    found = ruleJson[role].Select(j => readOnly ? ReadOnly(j) : j).OfType<string>().Select(j => RawRule.Parse(ListValued(j, lists))).ToList();
+                    widened[key] = found;
+                }
+
+                return found;
+            }
 
             object user = new { user = new { id = account.Id, username = account.Username, directoryId = account.DirectoryId, groupIds } };
             AbilityBuilder builder = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options).WithVariables(user);
             // Each grant applies in its own scope, and in any scope a module widens it to (ADR 0033).
             List<(RoleGrant Grant, JsonObject Scope, bool ReadOnly)> applied = [];
+            Dictionary<Guid, JsonObject> ownScopes = [];
             foreach (RoleGrant grant in grants)
             {
                 JsonObject own = JsonNode.Parse(grant.ScopeJson) as JsonObject ?? [];
+                ownScopes[grant.Id] = own;
                 applied.Add((grant, own, false));
                 foreach (IGrantScopeExpander expander in expanders)
                 {
@@ -93,7 +106,7 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
             foreach ((RoleGrant grant, JsonObject grantScope, bool readOnly) in applied)
             {
                 object scope = new { grant = grantScope };
-                List<RawRule> grantRules = (readOnly ? ReadRules() : rules)[grant.RoleId].ToList();
+                List<RawRule> grantRules = ReferenceEquals(grantScope, ownScopes[grant.Id]) ? rules[grant.RoleId].ToList() : Widened(grant.RoleId, readOnly, grantScope);
                 if (grantRules.Count == 0)
                 {
                     continue;
@@ -131,6 +144,46 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
     /// A rule narrowed to reading: its actions become "read" when it allows (or denies) reading or managing; any other
     /// rule is dropped. Used where a grant reaches further than where it was given, for reading only.
     /// </summary>
+    /// <summary>
+    /// A rule for a scope whose values may be lists: a condition that is exactly "${grant.X}" becomes
+    /// { "$in": "${grant.X} } when X holds a list, so one rule covers every project a grant reaches instead of one rule
+    /// per project.
+    /// </summary>
+    internal static string ListValued(string json, IReadOnlySet<string> lists)
+    {
+        if (lists.Count == 0 || JsonNode.Parse(json) is not JsonObject rule || rule["conditions"] is not JsonObject conditions)
+        {
+            return json;
+        }
+
+        void Walk(JsonObject node)
+        {
+            foreach ((string name, JsonNode? value) in node.ToList())
+            {
+                switch (value)
+                {
+                    case JsonValue v when v.TryGetValue(out string? text) && text.StartsWith("${grant.", StringComparison.Ordinal) && text.EndsWith('}')
+                                          && lists.Contains(text[8..^1]):
+                        node[name] = new JsonObject { ["$in"] = text };
+                        break;
+                    case JsonObject child:
+                        Walk(child);
+                        break;
+                    case JsonArray items:
+                        foreach (JsonObject item in items.OfType<JsonObject>())
+                        {
+                            Walk(item);
+                        }
+
+                        break;
+                }
+            }
+        }
+
+        Walk(conditions);
+        return rule.ToJsonString();
+    }
+
     internal static string? ReadOnly(string json)
     {
         if (JsonNode.Parse(json) is not JsonObject rule)
