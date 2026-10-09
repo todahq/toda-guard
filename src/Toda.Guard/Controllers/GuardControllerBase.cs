@@ -94,9 +94,14 @@ public sealed record EffectiveGroupDto(Guid GroupId, string Name, Guid Directory
 
 public sealed record AccountDetailDto(AccountDto Account, List<IdentityDto> Identities, List<EffectiveGroupDto> Groups);
 
+/// <summary>
+/// A group: Kind (standard, directory, ou, organization, ADR 0037); Computed when Toda works out its members (a directory's
+/// or an OU's group); an organization's attributes and email domains.
+/// </summary>
 public sealed record GroupDto(
     Guid Id, string Name, string? Description, Guid DirectoryId, string DirectoryName,
-    bool IsLocal, bool Writable, int DirectMemberCount, int MemberGroupCount);
+    bool IsLocal, bool Writable, int DirectMemberCount, int MemberGroupCount, string Kind, bool Computed,
+    Dictionary<string, string> Attributes, List<string> EmailDomains);
 
 public sealed record GroupMemberDto(string MemberType, Guid MemberId, string Name, string? DisplayName, string DirectoryName, string Source, bool Removable);
 

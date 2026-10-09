@@ -68,12 +68,17 @@ public sealed record DirectoryUserRecord(
     string? Email,
     bool IsActive = true);
 
+/// <summary>
+/// A group as the directory has it. Kind is null for a security group, or "ou" for a group of everyone under an
+/// organizational unit (ADR 0037), which Toda marks so admins can tell the two apart and grant either.
+/// </summary>
 public sealed record DirectoryGroupRecord(
     string ExternalId,
     string Name,
     string? Description,
     IReadOnlyList<string> MemberUserExternalIds,
-    IReadOnlyList<string> MemberGroupExternalIds);
+    IReadOnlyList<string> MemberGroupExternalIds,
+    string? Kind = null);
 
 public sealed record ConnectorAuthResult(bool Succeeded, string? ExternalId = null, string? Error = null)
 {

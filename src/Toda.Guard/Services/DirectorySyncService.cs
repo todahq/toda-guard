@@ -93,6 +93,7 @@ public class DirectorySyncService(
                 directory.LastSyncSucceeded = true;
                 directory.LastSyncMessage = $"{run.UsersAdded} added, {run.UsersUpdated} updated, {run.UsersDeactivated} deactivated, {run.GroupsSynced} groups";
                 await db.SaveChangesAsync(cancellationToken);
+                await Organizations.ApplyDomainsAsync(db, cancellationToken); // emails may have changed
             }, requiresNew: true, cancellationToken, isTransactional: true);
         }
         catch (Exception ex)
@@ -172,7 +173,9 @@ public class DirectorySyncService(
 
     private static async Task ApplyGroupsAsync(GuardDbContext db, UserDirectory directory, List<DirectoryGroupRecord> records, SyncRun run, CancellationToken cancellationToken)
     {
-        List<Group> existing = await db.Groups.Where(g => g.DirectoryId == directory.Id).ToListAsync(cancellationToken);
+        // The directory's own group (and organizations) aren't the connector's: only standard and OU groups sync.
+        List<Group> existing = await db.Groups.Where(g => g.DirectoryId == directory.Id && (g.Kind == GroupKinds.Standard || g.Kind == GroupKinds.Ou))
+            .ToListAsync(cancellationToken);
         Dictionary<string, Group> byExternalId = existing.Where(g => g.ExternalId is not null).ToDictionary(g => g.ExternalId!, StringComparer.OrdinalIgnoreCase);
         Dictionary<string, Group> byName = existing.ToDictionary(g => g.NormalizedName);
         Dictionary<string, Group> recordToGroup = new(StringComparer.OrdinalIgnoreCase);
@@ -190,6 +193,7 @@ public class DirectorySyncService(
             group.ExternalId = record.ExternalId;
             group.SetName(record.Name);
             group.Description = record.Description;
+            group.Kind = record.Kind == GroupKinds.Ou ? GroupKinds.Ou : GroupKinds.Standard;
             recordToGroup[record.ExternalId] = group;
             run.GroupsSynced++;
         }

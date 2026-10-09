@@ -41,6 +41,7 @@ public class RolesController(GuardDb guardDb, RoleCatalog roleCatalog) : GuardCo
             names[g.Id] = g.Name;
         }
 
+        names[GuardConstants.AnonymousId] = RoleCatalog.AnonymousName;
         return roles.Select(r => new RoleDto(
                 r.Id, r.Key, r.Name, r.Description, r.IsSystem,
                 rules[r.Id].Select(x => JsonNode.Parse(x.Json)).ToList(),
@@ -105,6 +106,11 @@ public class RolesController(GuardDb guardDb, RoleCatalog roleCatalog) : GuardCo
         if (!Enum.TryParse(input.PrincipalType, ignoreCase: true, out PrincipalType principalType))
         {
             throw new UserFriendlyException("principalType is Account or Group.");
+        }
+
+        if (principalType == PrincipalType.Anonymous)
+        {
+            throw new UserFriendlyException("Anonymous visitors get roles in projects only (a project's members), never across the site.");
         }
 
         await roleCatalog.GrantAsync(roleId, principalType, input.PrincipalId, input.Scope ?? [], scopeKey: null, input.ValidUntil, CurrentAccountId, cancellationToken);

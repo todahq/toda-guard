@@ -52,6 +52,25 @@ public class MembershipTests
     }
 
     [Fact]
+    public void A_directory_group_takes_everyone_from_its_directory_without_rows()
+    {
+        Group corpEveryone = Group("Corp (everyone)", _corp);
+        corpEveryone.Kind = GroupKinds.Directory;
+        Group internalEveryone = Group("Toda internal (everyone)", _internal);
+        internalEveryone.Kind = GroupKinds.Directory;
+        Group customers = Group("customers", _internal);
+        Nest(customers, corpEveryone, MembershipSource.Manual); // granting a role to a whole directory, through a group
+        Guid user = Guid.NewGuid();
+
+        var groups = MembershipGraph.ResolveEffectiveGroups(Snapshot(), ActiveAccount(user), new HashSet<Guid> { user }, new HashSet<Guid> { _corp });
+
+        Assert.Contains(groups, g => g.Group == corpEveryone && g.Direct);
+        Assert.Equal(["Corp (everyone)", "customers"], groups.Single(g => g.Group == customers).Path);
+        Assert.DoesNotContain(groups, g => g.Group == internalEveryone);
+        Assert.Empty(_memberships.Where(m => m.GroupId == corpEveryone.Id));
+    }
+
+    [Fact]
     public void The_shortest_path_wins()
     {
         Group a = Group("a", _corp), b = Group("b", _corp), top = Group("top", _corp);

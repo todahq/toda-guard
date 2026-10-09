@@ -53,6 +53,12 @@ public enum PrincipalType
 
     /// <summary>Everyone in the group, including through nested groups.</summary>
     Group,
+
+    /// <summary>
+    /// Whoever isn't signed in (ADR 0037), with <see cref="GuardConstants.AnonymousId"/>. What it's granted, everyone
+    /// gets: signed in or not.
+    /// </summary>
+    Anonymous,
 }
 
 /// <summary>Gives a role to an account or a group, with a scope that fills the role's ${grant.*} placeholders.</summary>

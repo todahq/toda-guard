@@ -122,6 +122,9 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<string>("PasswordHash")
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("PendingSince")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -145,6 +148,10 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Attributes")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -154,11 +161,22 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<Guid>("DirectoryId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("EmailDomains")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("ExternalId")
                         .HasColumnType("text");
 
                     b.Property<bool>("IsLocal")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("standard");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -171,6 +189,8 @@ namespace Toda.Guard.Data.Migrations
                         .HasColumnType("character varying(256)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Kind");
 
                     b.HasIndex("DirectoryId", "NormalizedName")
                         .IsUnique();
@@ -337,6 +357,29 @@ namespace Toda.Guard.Data.Migrations
                     b.HasIndex("Time");
 
                     b.ToTable("security_events", "guard");
+                });
+
+            modelBuilder.Entity("Toda.Guard.Domain.SignUpSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DirectoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EmailDomains")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("signup_settings", "guard");
                 });
 
             modelBuilder.Entity("Toda.Guard.Domain.SyncRun", b =>

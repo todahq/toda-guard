@@ -53,7 +53,8 @@ public class DirectoriesController(
     public async Task<DirectoryDto> Create([FromBody] DirectoryInput input, CancellationToken cancellationToken)
     {
         List<ConnectorDescription> available = await connectors.DescribeAllAsync();
-        ConnectorDescription connector = available.FirstOrDefault(c => c.Type == input.Type)
+        // An internal directory keeps its accounts in Toda (a "Customers" directory for sign-ups, ADR 0037); others need a connector.
+        ConnectorDescription? connector = input.Type == GuardConstants.InternalType ? null : available.FirstOrDefault(c => c.Type == input.Type)
             ?? throw new UserFriendlyException($"No connector for directory type '{input.Type}'. Is its plugin enabled?");
 
         (DirectoryDto dto, List<object> events) = await guardDb.RunAsync(async db =>
@@ -62,6 +63,8 @@ public class DirectoriesController(
             UserDirectory directory = new(Guid.NewGuid(), RequireName(input.Name), input.Type, order);
             Apply(directory, input, connector, isNew: true);
             db.Directories.Add(directory);
+            await db.SaveChangesAsync(cancellationToken);
+            await DirectoryGroups.EnsureAsync(db, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             List<object> events = await projector.RebuildAsync(db, cancellationToken: cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -93,6 +96,8 @@ public class DirectoriesController(
 
             directory.Name = RequireName(input.Name);
             Apply(directory, input, connector, isNew: false);
+            await db.SaveChangesAsync(cancellationToken);
+            await DirectoryGroups.EnsureAsync(db, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             List<object> events = await projector.RebuildAsync(db, cancellationToken: cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -146,6 +151,11 @@ public class DirectoriesController(
             if (me.DirectoryId == id)
             {
                 throw new UserFriendlyException("You can't delete the directory your own account comes from.");
+            }
+
+            if (await db.SignUpSettings.AnyAsync(s => s.DirectoryId == id, cancellationToken))
+            {
+                throw new UserFriendlyException($"Sign-up creates accounts in {directory.Name}. Choose another directory for sign-ups first.");
             }
 
             List<Guid> groupIds = await db.Groups.Where(g => g.DirectoryId == id).Select(g => g.Id).ToListAsync(cancellationToken);

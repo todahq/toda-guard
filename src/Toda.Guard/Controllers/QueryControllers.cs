@@ -96,7 +96,10 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
     private static async Task<EntityQueryModel<Group>> GroupModelAsync(GuardDbContext db, CancellationToken ct)
     {
         // Distinct members, as the group pages count them; a query in SQL for filters and sorting, loaded once per page for columns.
-        Expression<Func<Group, int>> members = g => db.Memberships.Where(m => m.GroupId == g.Id && m.MemberType != MemberType.Group).Select(m => m.MemberId).Distinct().Count();
+        // A directory's group has no rows: its members are the active accounts its directory owns (ADR 0037).
+        Expression<Func<Group, int>> members = g => g.Kind == GroupKinds.Directory
+            ? db.Accounts.Count(a => a.DirectoryId == g.DirectoryId && a.Status == AccountStatus.Active)
+            : db.Memberships.Where(m => m.GroupId == g.Id && m.MemberType != MemberType.Group).Select(m => m.MemberId).Distinct().Count();
         Expression<Func<Group, int>> memberGroups = g => db.Memberships.Where(m => m.GroupId == g.Id && m.MemberType == MemberType.Group).Select(m => m.MemberId).Distinct().Count();
         async Task<IReadOnlyDictionary<Guid, object?>> CountAsync(IReadOnlyList<Group> rows, bool groups, CancellationToken token)
         {
@@ -106,7 +109,11 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
                 .GroupBy(m => m.GroupId)
                 .Select(x => new { x.Key, Count = x.Select(m => m.MemberId).Distinct().Count() })
                 .ToDictionaryAsync(x => x.Key, x => x.Count, token);
-            return ids.ToDictionary(id => id, id => (object?)counts.GetValueOrDefault(id));
+            List<Guid> directories = groups ? [] : rows.Where(g => g.Kind == GroupKinds.Directory).Select(g => g.DirectoryId).ToList();
+            Dictionary<Guid, int> owned = directories.Count == 0 ? [] : await db.Accounts.AsNoTracking()
+                .Where(a => a.Status == AccountStatus.Active && directories.Contains(a.DirectoryId)).GroupBy(a => a.DirectoryId)
+                .ToDictionaryAsync(x => x.Key, x => x.Count(), token);
+            return rows.ToDictionary(g => g.Id, g => (object?)(!groups && g.Kind == GroupKinds.Directory ? owned.GetValueOrDefault(g.DirectoryId) : counts.GetValueOrDefault(g.Id)));
         }
 
         return new(
@@ -122,8 +129,19 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
                 ChoiceValue = key => key.Equals("local", StringComparison.OrdinalIgnoreCase),
                 Display = g => g.IsLocal ? "local" : "directory",
             },
+            new()
+            {
+                Definition = new("kind", FieldKind.Choice, "Kind", FieldLabels.Ar("النوع"), Sortable: true, Groupable: true, Nullable: false),
+                Member = (Expression<Func<Group, string>>)(g => g.Kind),
+                Choices = new Dictionary<string, string>
+                {
+                    [GroupKinds.Standard] = "Group", [GroupKinds.Directory] = "Everyone in a directory", [GroupKinds.Ou] = "OU", [GroupKinds.Organization] = "Organization",
+                },
+                ChoiceValue = key => key.ToLowerInvariant(),
+                Display = g => g.Kind,
+            },
             new() { Definition = new("members", FieldKind.Number, "Direct members", FieldLabels.Ar("الأعضاء المباشرون"), Sortable: true, Nullable: false), Member = members, Load = (rows, t) => CountAsync(rows, false, t) },
             new() { Definition = new("memberGroups", FieldKind.Number, "Member groups", FieldLabels.Ar("المجموعات الأعضاء"), Sortable: true, Nullable: false), Member = memberGroups, Load = (rows, t) => CountAsync(rows, true, t) },
-        ], ["name", "description", "directory", "source", "members", "memberGroups"], g => g.Id, g => g.Name, (Expression<Func<Group, string>>)(g => g.Name));
+        ], ["name", "kind", "description", "directory", "source", "members", "memberGroups"], g => g.Id, g => g.Name, (Expression<Func<Group, string>>)(g => g.Name));
     }
 }

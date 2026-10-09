@@ -95,6 +95,14 @@ public class TodaGuardModule : AbpModule
             options.Expose<IDirectoryConnectionProvider>((hostScope, plugin) => new PluginDirectoryConnectionProvider(hostScope, plugin.Key));
         });
     }
+
+    public override void OnApplicationInitialization(Volo.Abp.ApplicationInitializationContext context)
+    {
+        // The mails self-service sends (ADR 0037), as templates admins can reword (ADR 0039).
+        Toda.Platform.Templates.TemplateCatalog templates = context.ServiceProvider.GetRequiredService<Toda.Platform.Templates.TemplateCatalog>();
+        templates.Register(SelfServiceMail.VerifyDefinition);
+        templates.Register(SelfServiceMail.ResetDefinition);
+    }
 }
 
 public sealed class TodaAdminRequirement : IAuthorizationRequirement;

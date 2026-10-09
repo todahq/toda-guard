@@ -61,84 +61,115 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
             DateTime now = DateTime.UtcNow;
             List<RoleGrant> grants = await db.RoleGrants.AsNoTracking()
                 .Where(g => (g.PrincipalType == PrincipalType.Account && g.PrincipalId == account.Id)
-                         || (g.PrincipalType == PrincipalType.Group && groupIds.Contains(g.PrincipalId)))
+                         || (g.PrincipalType == PrincipalType.Group && groupIds.Contains(g.PrincipalId))
+                         || g.PrincipalType == PrincipalType.Anonymous) // what anyone may do, a signed-in person may too
                 .Where(g => g.ValidUntil == null || g.ValidUntil > now)
                 .ToListAsync(cancellationToken);
-            List<Guid> roleIds = grants.Select(g => g.RoleId).Distinct().ToList();
-            ILookup<Guid, string> ruleJson = (await db.RoleRules.AsNoTracking().Where(r => roleIds.Contains(r.RoleId)).OrderBy(r => r.Order).ToListAsync(cancellationToken))
-                .ToLookup(r => r.RoleId, r => r.Json);
-            ILookup<Guid, RawRule> rules = ruleJson.SelectMany(g => g.Select(j => (g.Key, Rule: RawRule.Parse(j)))).ToLookup(x => x.Key, x => x.Rule);
-
-            // Rules for a widened scope (ADR 0033), made once per role, read-only or not, and list-valued placeholders.
-            Dictionary<(Guid Role, bool ReadOnly, string Lists), List<RawRule>> widened = [];
-            List<RawRule> Widened(Guid role, bool readOnly, JsonObject scope)
-            {
-                HashSet<string> lists = scope.Where(p => p.Value is JsonArray).Select(p => p.Key).ToHashSet(StringComparer.Ordinal);
-                (Guid, bool, string) key = (role, readOnly, string.Join(",", lists.Order(StringComparer.Ordinal)));
-                if (!widened.TryGetValue(key, out List<RawRule>? found))
-                {
-                    found = ruleJson[role].Select(j => readOnly ? ReadOnly(j) : j).OfType<string>().Select(j => RawRule.Parse(ListValued(j, lists))).ToList();
-                    widened[key] = found;
-                }
-
-                return found;
-            }
-
             object user = new { user = new { id = account.Id, username = account.Username, directoryId = account.DirectoryId, groupIds } };
-            AbilityBuilder builder = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options).WithVariables(user);
-            // Each grant applies in its own scope, and in any scope a module widens it to (ADR 0033).
-            List<(RoleGrant Grant, JsonObject Scope, bool ReadOnly)> applied = [];
-            Dictionary<Guid, JsonObject> ownScopes = [];
-            foreach (RoleGrant grant in grants)
-            {
-                JsonObject own = JsonNode.Parse(grant.ScopeJson) as JsonObject ?? [];
-                ownScopes[grant.Id] = own;
-                applied.Add((grant, own, false));
-                foreach (IGrantScopeExpander expander in expanders)
-                {
-                    foreach (GrantExpansion expansion in await expander.ExpandAsync(own, cancellationToken))
-                    {
-                        applied.Add((grant, expansion.Scope, expansion.ReadOnly));
-                    }
-                }
-            }
-
-            foreach ((RoleGrant grant, JsonObject grantScope, bool readOnly) in applied)
-            {
-                object scope = new { grant = grantScope };
-                List<RawRule> grantRules = ReferenceEquals(grantScope, ownScopes[grant.Id]) ? rules[grant.RoleId].ToList() : Widened(grant.RoleId, readOnly, grantScope);
-                if (grantRules.Count == 0)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    // Check each grant on its own so one broken grant can't take down the others.
-                    _ = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options).WithVariables(user).AddRange(grantRules, scope).Build();
-                }
-                catch (CaslConfigurationException ex)
-                {
-                    if (grantRules.Any(r => r.Inverted))
-                    {
-                        // Skipping a grant with deny rules could widen access: deny everything instead.
-                        logger.LogError("Grant {Grant} has an invalid deny rule ({Error}); account {Account} gets no access until it is fixed.", grant.Id, ex.Message, account.Id);
-                        return None;
-                    }
-
-                    logger.LogWarning("Grant {Grant} skipped: {Error}", grant.Id, ex.Message);
-                    continue;
-                }
-
-                builder.AddRange(grantRules, scope);
-            }
-
-            return builder.Build();
+            return await BuildAsync(db, grants, user, account.Id, cancellationToken);
         }, cancellationToken: cancellationToken);
 
         _cache[accountId] = ability;
         return ability;
     }
+
+    /// <summary>
+    /// What someone who isn't signed in may do (ADR 0037): only what's granted to the Anonymous principal. Rules that
+    /// name the person (${user.id}) match no one.
+    /// </summary>
+    public async Task<Ability> ForAnonymousAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cache.TryGetValue(GuardConstants.AnonymousId, out Ability? cached))
+        {
+            return cached;
+        }
+
+        Ability ability = await guardDb.RunAsync(async db =>
+        {
+            DateTime now = DateTime.UtcNow;
+            List<RoleGrant> grants = await db.RoleGrants.AsNoTracking()
+                .Where(g => g.PrincipalType == PrincipalType.Anonymous && (g.ValidUntil == null || g.ValidUntil > now))
+                .ToListAsync(cancellationToken);
+            object user = new { user = new { id = GuardConstants.AnonymousId, username = "", directoryId = Guid.Empty, groupIds = new List<Guid>() } };
+            return grants.Count == 0 ? None : await BuildAsync(db, grants, user, GuardConstants.AnonymousId, cancellationToken);
+        }, cancellationToken: cancellationToken);
+
+        _cache[GuardConstants.AnonymousId] = ability;
+        return ability;
+    }
+
+    /// <summary>The ability the grants give, each grant in its own scope and in any scope a module widens it to.</summary>
+    private async Task<Ability> BuildAsync(Data.GuardDbContext db, List<RoleGrant> grants, object user, Guid subject, CancellationToken cancellationToken)
+    {
+        List<Guid> roleIds = grants.Select(g => g.RoleId).Distinct().ToList();
+        ILookup<Guid, string> ruleJson = (await db.RoleRules.AsNoTracking().Where(r => roleIds.Contains(r.RoleId)).OrderBy(r => r.Order).ToListAsync(cancellationToken))
+            .ToLookup(r => r.RoleId, r => r.Json);
+        ILookup<Guid, RawRule> rules = ruleJson.SelectMany(g => g.Select(j => (g.Key, Rule: RawRule.Parse(j)))).ToLookup(x => x.Key, x => x.Rule);
+
+        // Rules for a widened scope (ADR 0033), made once per role, read-only or not, and list-valued placeholders.
+        Dictionary<(Guid Role, bool ReadOnly, string Lists), List<RawRule>> widened = [];
+        List<RawRule> Widened(Guid role, bool readOnly, JsonObject scope)
+        {
+            HashSet<string> lists = scope.Where(p => p.Value is JsonArray).Select(p => p.Key).ToHashSet(StringComparer.Ordinal);
+            (Guid, bool, string) key = (role, readOnly, string.Join(",", lists.Order(StringComparer.Ordinal)));
+            if (!widened.TryGetValue(key, out List<RawRule>? found))
+            {
+                found = ruleJson[role].Select(j => readOnly ? ReadOnly(j) : j).OfType<string>().Select(j => RawRule.Parse(ListValued(j, lists))).ToList();
+                widened[key] = found;
+            }
+
+            return found;
+        }
+
+        AbilityBuilder builder = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options).WithVariables(user);
+        // Each grant applies in its own scope, and in any scope a module widens it to (ADR 0033).
+        List<(RoleGrant Grant, JsonObject Scope, bool ReadOnly)> applied = [];
+        Dictionary<Guid, JsonObject> ownScopes = [];
+        foreach (RoleGrant grant in grants)
+        {
+            JsonObject own = JsonNode.Parse(grant.ScopeJson) as JsonObject ?? [];
+            ownScopes[grant.Id] = own;
+            applied.Add((grant, own, false));
+            foreach (IGrantScopeExpander expander in expanders)
+            {
+                foreach (GrantExpansion expansion in await expander.ExpandAsync(own, cancellationToken))
+                {
+                    applied.Add((grant, expansion.Scope, expansion.ReadOnly));
+                }
+            }
+        }
+
+        foreach ((RoleGrant grant, JsonObject grantScope, bool readOnly) in applied)
+        {
+            object scope = new { grant = grantScope };
+            List<RawRule> grantRules = ReferenceEquals(grantScope, ownScopes[grant.Id]) ? rules[grant.RoleId].ToList() : Widened(grant.RoleId, readOnly, grantScope);
+            if (grantRules.Count == 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                // Check each grant on its own so one broken grant can't take down the others.
+                _ = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options).WithVariables(user).AddRange(grantRules, scope).Build();
+            }
+            catch (CaslConfigurationException ex)
+            {
+                if (grantRules.Any(r => r.Inverted))
+                {
+                    // Skipping a grant with deny rules could widen access: deny everything instead.
+                    logger.LogError("Grant {Grant} has an invalid deny rule ({Error}); account {Account} gets no access until it is fixed.", grant.Id, ex.Message, subject);
+                    return None;
+                }
+
+                logger.LogWarning("Grant {Grant} skipped: {Error}", grant.Id, ex.Message);
+                continue;
+            }
+
+            builder.AddRange(grantRules, scope);
+        }
+
+        return builder.Build();    }
 
     /// <summary>
     /// A rule narrowed to reading: its actions become "read" when it allows (or denies) reading or managing; any other

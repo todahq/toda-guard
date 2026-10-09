@@ -20,6 +20,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<RoleRule> RoleRules => Set<RoleRule>();
     public DbSet<RoleGrant> RoleGrants => Set<RoleGrant>();
+    public DbSet<SignUpSettings> SignUpSettings => Set<SignUpSettings>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -62,7 +63,25 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.ToTable("groups");
             b.Property(x => x.Name).HasMaxLength(256).IsRequired();
             b.Property(x => x.NormalizedName).HasMaxLength(256).IsRequired();
+            b.Property(x => x.Kind).HasMaxLength(16).IsRequired().HasDefaultValue(GroupKinds.Standard);
+            System.Text.Json.JsonSerializerOptions json = new(System.Text.Json.JsonSerializerDefaults.Web);
+            b.Property(x => x.Attributes).HasColumnType("jsonb").HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v, json),
+                v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v, json) ?? new(),
+                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<Dictionary<string, string>>(
+                    (a, b) => System.Text.Json.JsonSerializer.Serialize(a, json) == System.Text.Json.JsonSerializer.Serialize(b, json),
+                    v => System.Text.Json.JsonSerializer.Serialize(v, json).GetHashCode(),
+                    v => new Dictionary<string, string>(v)));
+            b.Property(x => x.EmailDomains).HasColumnType("jsonb").HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v, json),
+                v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, json) ?? new(),
+                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<List<string>>(
+                    (a, b) => a!.SequenceEqual(b!),
+                    v => string.Join(",", v).GetHashCode(),
+                    v => v.ToList()));
+            b.Ignore(x => x.Computed);
             b.HasIndex(x => new { x.DirectoryId, x.NormalizedName }).IsUnique();
+            b.HasIndex(x => x.Kind);
         });
 
         builder.Entity<GroupMembership>(b =>
@@ -104,6 +123,20 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.HasIndex(x => new { x.PrincipalType, x.PrincipalId });
             b.HasIndex(x => x.ScopeKey);
             b.HasIndex(x => x.RoleId);
+        });
+
+        builder.Entity<SignUpSettings>(b =>
+        {
+            b.ToTable("signup_settings");
+            b.Property(x => x.Id).ValueGeneratedNever();
+            System.Text.Json.JsonSerializerOptions json = new(System.Text.Json.JsonSerializerDefaults.Web);
+            b.Property(x => x.EmailDomains).HasColumnType("jsonb").HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v, json),
+                v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, json) ?? new(),
+                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<List<string>>(
+                    (a, b) => a!.SequenceEqual(b!),
+                    v => string.Join(",", v).GetHashCode(),
+                    v => v.ToList()));
         });
 
         builder.Entity<SecurityEvent>(b =>

@@ -125,9 +125,12 @@ public class RoleCatalog(GuardDb guardDb, MembershipGraph graph) : ITransientDep
                 throw new EntityNotFoundException(typeof(Role), roleId);
             }
 
-            bool principalExists = principalType == PrincipalType.Account
-                ? await db.Accounts.AnyAsync(a => a.Id == principalId, cancellationToken)
-                : await db.Groups.AnyAsync(g => g.Id == principalId, cancellationToken);
+            bool principalExists = principalType switch
+            {
+                PrincipalType.Account => await db.Accounts.AnyAsync(a => a.Id == principalId, cancellationToken),
+                PrincipalType.Group => await db.Groups.AnyAsync(g => g.Id == principalId, cancellationToken),
+                _ => principalId == GuardConstants.AnonymousId,
+            };
             if (!principalExists)
             {
                 throw new UserFriendlyException($"No {principalType} with id {principalId}.");
@@ -168,6 +171,24 @@ public class RoleCatalog(GuardDb guardDb, MembershipGraph graph) : ITransientDep
             await db.SaveChangesAsync(cancellationToken);
         }, cancellationToken: cancellationToken);
 
+    /// <summary>How the Anonymous principal is named where grants are listed.</summary>
+    public const string AnonymousName = "Anonymous visitors";
+
+    /// <summary>Every grant to the Anonymous principal (ADR 0037): what anyone, signed in or not, may do.</summary>
+    public Task<List<GrantInfo>> AnonymousGrantsAsync(CancellationToken cancellationToken = default) =>
+        guardDb.RunAsync(async db =>
+        {
+            var rows = await (from g in db.RoleGrants.AsNoTracking()
+                              join r in db.Roles.AsNoTracking() on g.RoleId equals r.Id
+                              where g.PrincipalType == PrincipalType.Anonymous
+                              orderby g.CreatedAt
+                              select new { Grant = g, r.Key, r.Name }).ToListAsync(cancellationToken);
+            return rows.Select(x => new GrantInfo(
+                    x.Grant.Id, x.Grant.RoleId, x.Key, x.Name, x.Grant.PrincipalType, x.Grant.PrincipalId, AnonymousName,
+                    JsonNode.Parse(x.Grant.ScopeJson) as JsonObject ?? [], x.Grant.ScopeKey, x.Grant.ValidUntil, x.Grant.CreatedAt))
+                .ToList();
+        }, cancellationToken: cancellationToken);
+
     /// <summary>Grants with this scope key, for example everyone with a role in one project.</summary>
     public Task<List<GrantInfo>> ListGrantsAsync(string scopeKey, CancellationToken cancellationToken = default) =>
         guardDb.RunAsync(async db =>
@@ -184,6 +205,7 @@ public class RoleCatalog(GuardDb guardDb, MembershipGraph graph) : ITransientDep
                 names[g.Id] = g.Name;
             }
 
+            names[GuardConstants.AnonymousId] = AnonymousName;
             return rows.Select(x => new GrantInfo(
                     x.Grant.Id, x.Grant.RoleId, x.Key, x.Name, x.Grant.PrincipalType, x.Grant.PrincipalId,
                     names.GetValueOrDefault(x.Grant.PrincipalId, "(removed)"), JsonNode.Parse(x.Grant.ScopeJson) as JsonObject ?? [],

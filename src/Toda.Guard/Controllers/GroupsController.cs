@@ -15,10 +15,15 @@ namespace Toda.Guard.Controllers;
 public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardControllerBase
 {
     [HttpGet]
-    public Task<List<GroupDto>> List([FromQuery] string? search, [FromQuery] Guid? directoryId, CancellationToken cancellationToken) =>
+    public Task<List<GroupDto>> List([FromQuery] string? search, [FromQuery] Guid? directoryId, [FromQuery] string? kind, CancellationToken cancellationToken) =>
         guardDb.RunAsync(async db =>
         {
             IQueryable<Group> query = db.Groups.AsNoTracking();
+            if (!string.IsNullOrWhiteSpace(kind))
+            {
+                query = query.Where(g => g.Kind == kind);
+            }
+
             if (!string.IsNullOrWhiteSpace(search))
             {
                 string s = GuardConstants.Normalize(search);
@@ -95,7 +100,12 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
                 effective);
         }, cancellationToken: cancellationToken);
 
-    public sealed record CreateGroupInput(string Name, string? Description, Guid? DirectoryId);
+    /// <summary>A group to make in Toda: standard, or an organization (ADR 0037) with attributes and email domains.</summary>
+    public sealed record CreateGroupInput(string Name, string? Description, Guid? DirectoryId, string? Kind = null, Dictionary<string, string>? Attributes = null,
+        List<string>? EmailDomains = null);
+
+    /// <summary>What can change on a group made in Toda: its name and description, and an organization's attributes and domains.</summary>
+    public sealed record UpdateGroupInput(string Name, string? Description, Dictionary<string, string>? Attributes = null, List<string>? EmailDomains = null);
 
     [HttpPost]
     public async Task<GroupDto> Create([FromBody] CreateGroupInput input, CancellationToken cancellationToken)
@@ -106,10 +116,20 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
             throw new UserFriendlyException("In this PoC, groups are created in the internal directory. Nest a synced group inside it to reuse a directory group.");
         }
 
+        string kind = input.Kind ?? GroupKinds.Standard;
+        if (kind is not (GroupKinds.Standard or GroupKinds.Organization))
+        {
+            throw new UserFriendlyException("Groups made here are standard groups or organizations; Toda keeps directory and OU groups itself.");
+        }
+
         if (string.IsNullOrWhiteSpace(input.Name) || input.Name.Trim().Length > 128)
         {
             throw new UserFriendlyException("Group names are 1–128 characters.");
         }
+
+        (Dictionary<string, string> attributes, List<string> domains) = kind == GroupKinds.Organization
+            ? Organization(input.Attributes, input.EmailDomains)
+            : ([], []);
 
         GroupDto dto = await guardDb.RunAsync(async db =>
         {
@@ -119,13 +139,69 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
                 throw new UserFriendlyException($"The internal directory already has a group called '{input.Name.Trim()}'.");
             }
 
-            Group group = new(Guid.NewGuid(), directoryId, input.Name, isLocal: true) { Description = input.Description?.Trim() };
+            Group group = new(Guid.NewGuid(), directoryId, input.Name, isLocal: true)
+            {
+                Description = input.Description?.Trim(),
+                Kind = kind,
+                Attributes = attributes,
+                EmailDomains = domains,
+            };
             db.Groups.Add(group);
             await db.SaveChangesAsync(cancellationToken);
+            if (kind == GroupKinds.Organization)
+            {
+                await Organizations.ApplyDomainsAsync(db, cancellationToken);
+            }
+
             return (await ToDtosAsync(db, [group], cancellationToken))[0];
         }, requiresNew: true, cancellationToken);
 
         await PublishAsync([new GroupCreatedEto(dto.Id, dto.Name)]);
+        return dto;
+    }
+
+    /// <summary>Renames a group made in Toda, changes its description, and an organization's attributes and domains.</summary>
+    [HttpPut("{id:guid}")]
+    public async Task<GroupDto> Update(Guid id, [FromBody] UpdateGroupInput input, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(input.Name) || input.Name.Trim().Length > 128)
+        {
+            throw new UserFriendlyException("Group names are 1–128 characters.");
+        }
+
+        GroupDto dto = await guardDb.RunAsync(async db =>
+        {
+            Group group = await db.Groups.FirstOrDefaultAsync(g => g.Id == id, cancellationToken) ?? throw new EntityNotFoundException(typeof(Group), id);
+            if (!IsWritable(group))
+            {
+                throw new UserFriendlyException(group.Computed
+                    ? $"Toda keeps '{group.Name}' in step with its directory; change the directory instead."
+                    : $"'{group.Name}' is synced from a directory. Change it there.");
+            }
+
+            string normalized = GuardConstants.Normalize(input.Name);
+            if (await db.Groups.AnyAsync(g => g.Id != id && g.DirectoryId == group.DirectoryId && g.NormalizedName == normalized, cancellationToken))
+            {
+                throw new UserFriendlyException($"There's already a group called '{input.Name.Trim()}'.");
+            }
+
+            group.SetName(input.Name);
+            group.Description = input.Description?.Trim();
+            if (group.Kind == GroupKinds.Organization)
+            {
+                (group.Attributes, group.EmailDomains) = Organization(input.Attributes, input.EmailDomains);
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            if (group.Kind == GroupKinds.Organization)
+            {
+                await Organizations.ApplyDomainsAsync(db, cancellationToken);
+            }
+
+            return (await ToDtosAsync(db, [group], cancellationToken))[0];
+        }, requiresNew: true, cancellationToken);
+
+        await PublishAsync([new MembershipChangedEto(id, dto.Name)]);
         return dto;
     }
 
@@ -143,7 +219,9 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
                 ?? throw new EntityNotFoundException(typeof(Group), id);
             if (!IsWritable(group))
             {
-                throw new UserFriendlyException($"'{group.Name}' is synced from a directory. Delete it there.");
+                throw new UserFriendlyException(group.Computed
+                    ? $"Toda keeps '{group.Name}' in step with its directory: it goes when the directory (or the OU in its settings) does."
+                    : $"'{group.Name}' is synced from a directory. Delete it there.");
             }
 
             await db.Memberships.Where(m => m.GroupId == id || (m.MemberType == MemberType.Group && m.MemberId == id)).ExecuteDeleteAsync(cancellationToken);
@@ -170,7 +248,9 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
                 ?? throw new EntityNotFoundException(typeof(Group), id);
             if (!IsWritable(group))
             {
-                throw new UserFriendlyException($"'{group.Name}' is synced from a directory, so its members are managed there. Nest it inside an internal group instead.");
+                throw new UserFriendlyException(group.Computed
+                    ? $"Toda works out who is in '{group.Name}' from its directory. Nest it inside another group instead."
+                    : $"'{group.Name}' is synced from a directory, so its members are managed there. Nest it inside an internal group instead.");
             }
 
             (MemberType type, Guid memberId) = input.AccountId is { } accountId
@@ -231,6 +311,11 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
             GroupMembership? manual = rows.FirstOrDefault(r => r.Source == MembershipSource.Manual);
             if (manual is null)
             {
+                if (rows.Any(r => r.Source == MembershipSource.Domain))
+                {
+                    throw new UserFriendlyException($"This person is in {group.Name} because of their email's domain. Change the organization's domains instead.");
+                }
+
                 if (rows.Count > 0)
                 {
                     string directory = await db.Directories.Where(d => d.Id == group.DirectoryId).Select(d => d.Name).FirstAsync(cancellationToken);
@@ -249,7 +334,32 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
         return NoContent();
     }
 
-    private static bool IsWritable(Group group) => group.IsLocal || group.DirectoryId == GuardConstants.InternalDirectoryId;
+    private static bool IsWritable(Group group) => !group.Computed && (group.IsLocal || group.DirectoryId == GuardConstants.InternalDirectoryId);
+
+    /// <summary>An organization's attributes (at most 20, names up to 64 characters, values up to 500) and email domains (at most 20).</summary>
+    private static (Dictionary<string, string> Attributes, List<string> Domains) Organization(Dictionary<string, string>? attributes, List<string>? domains)
+    {
+        Dictionary<string, string> clean = new(StringComparer.Ordinal);
+        foreach ((string name, string value) in attributes ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 64 || (value ?? "").Length > 500)
+            {
+                throw new UserFriendlyException("An attribute has a name of 1–64 characters and a value of at most 500.");
+            }
+
+            clean[name.Trim()] = value?.Trim() ?? "";
+        }
+
+        List<string> normalized = [];
+        foreach (string domain in domains ?? [])
+        {
+            normalized.Add(Organizations.NormalizeDomain(domain) ?? throw new UserFriendlyException($"'{domain}' isn't an email domain, such as example.com."));
+        }
+
+        return clean.Count > 20 || normalized.Count > 20
+            ? throw new UserFriendlyException("An organization has at most 20 attributes and 20 email domains.")
+            : (clean, normalized.Distinct().ToList());
+    }
 
     private static async Task<List<GroupDto>> ToDtosAsync(GuardDbContext db, List<Group> groups, CancellationToken cancellationToken)
     {
@@ -261,10 +371,16 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
             .Select(x => new { x.Key.GroupId, x.Key.IsGroup, Count = x.Select(m => m.MemberId).Distinct().Count() })
             .ToListAsync(cancellationToken);
 
+        // A directory's group has no rows: count the active accounts its directory owns.
+        List<Guid> directoryGroupDirectories = groups.Where(g => g.Kind == GroupKinds.Directory).Select(g => g.DirectoryId).ToList();
+        Dictionary<Guid, int> owned = directoryGroupDirectories.Count == 0 ? [] : await db.Accounts.AsNoTracking()
+            .Where(a => a.Status == AccountStatus.Active && directoryGroupDirectories.Contains(a.DirectoryId))
+            .GroupBy(a => a.DirectoryId).ToDictionaryAsync(x => x.Key, x => x.Count(), cancellationToken);
         return groups.Select(g => new GroupDto(
                 g.Id, g.Name, g.Description, g.DirectoryId, directories.GetValueOrDefault(g.DirectoryId, "?"), g.IsLocal, IsWritable(g),
-                counts.Where(c => c.GroupId == g.Id && !c.IsGroup).Sum(c => c.Count),
-                counts.Where(c => c.GroupId == g.Id && c.IsGroup).Sum(c => c.Count)))
+                g.Kind == GroupKinds.Directory ? owned.GetValueOrDefault(g.DirectoryId) : counts.Where(c => c.GroupId == g.Id && !c.IsGroup).Sum(c => c.Count),
+                counts.Where(c => c.GroupId == g.Id && c.IsGroup).Sum(c => c.Count),
+                g.Kind, g.Computed, g.Attributes, g.EmailDomains))
             .ToList();
     }
 }

@@ -9,6 +9,9 @@ public static class GuardConstants
     public static readonly Guid AdminsGroupId = Guid.Parse("00000000-0000-0000-0000-00000000a001");
     public static readonly Guid UsersGroupId = Guid.Parse("00000000-0000-0000-0000-00000000a002");
 
+    /// <summary>The Anonymous principal (ADR 0037): whoever isn't signed in. Granted nothing unless an admin grants it.</summary>
+    public static readonly Guid AnonymousId = Guid.Parse("00000000-0000-0000-0000-00000000b001");
+
     public static string Normalize(string value) => value.Trim().ToLowerInvariant();
 }
 
@@ -79,6 +82,12 @@ public class DirectoryUser : Entity<Guid>
     /// <summary>Only for the internal directory.</summary>
     public string? PasswordHash { get; set; }
 
+    /// <summary>
+    /// When someone signed up and hasn't confirmed their email yet (ADR 0037): the record stays inactive until they do.
+    /// Null for everyone else.
+    /// </summary>
+    public DateTime? PendingSince { get; set; }
+
     public DateTime? LastSyncedAt { get; set; }
     public DateTime CreatedAt { get; private set; }
 
@@ -142,6 +151,21 @@ public class Account : Entity<Guid>
 }
 
 /// <summary>
+/// What a group is (ADR 0037). Standard groups are made in Toda or synced; Toda keeps the others in step itself: a
+/// directory's group (everyone whose account comes from it), an LDAP OU's group (everyone under the OU), and
+/// organizations (customers, by hand or by their email's domain).
+/// </summary>
+public static class GroupKinds
+{
+    public const string Standard = "standard";
+    public const string Directory = "directory";
+    public const string Ou = "ou";
+    public const string Organization = "organization";
+
+    public static readonly IReadOnlyList<string> All = [Standard, Directory, Ou, Organization];
+}
+
+/// <summary>
 /// A group in one directory. Groups are identified by id, never by name: two directories can both have
 /// "admins", and an LDAP admin creating a same-named group must not gain anything in Toda.
 /// </summary>
@@ -167,6 +191,18 @@ public class Group : Entity<Guid>
 
     /// <summary>Created in Toda rather than synced from the directory.</summary>
     public bool IsLocal { get; private set; }
+
+    /// <summary>One of <see cref="GroupKinds"/>.</summary>
+    public string Kind { get; set; } = GroupKinds.Standard;
+
+    /// <summary>An organization's attributes (customer number, region...): names to values.</summary>
+    public Dictionary<string, string> Attributes { get; set; } = [];
+
+    /// <summary>An organization's email domains: active accounts whose email is in one of them are its members.</summary>
+    public List<string> EmailDomains { get; set; } = [];
+
+    /// <summary>Whether Toda works out the members itself (a directory's or an OU's group): no one adds or removes them.</summary>
+    public bool Computed => Kind is GroupKinds.Directory or GroupKinds.Ou;
 
     public DateTime CreatedAt { get; private set; }
 
@@ -196,6 +232,9 @@ public enum MembershipSource
 
     /// <summary>Added in Toda. Never touched by sync.</summary>
     Manual,
+
+    /// <summary>An organization's member because their email is in one of its domains; Toda adds and removes these.</summary>
+    Domain,
 }
 
 /// <summary>One row of the membership ledger: a member of a group, and who asserted it.</summary>

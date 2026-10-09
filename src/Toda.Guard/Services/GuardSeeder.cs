@@ -35,6 +35,13 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
         await EnsureGroupAsync(db, GuardConstants.AdminsGroupId, "toda-admins", "Toda administrators. Members, direct or nested, can administer Toda.", cancellationToken);
         await EnsureGroupAsync(db, GuardConstants.UsersGroupId, "toda-users", "Everyone who may sign in to Toda.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        await DirectoryGroups.EnsureAsync(db, cancellationToken);
+        if (!await db.SignUpSettings.AnyAsync(s => s.Id == SignUpSettings.SiteId, cancellationToken))
+        {
+            db.SignUpSettings.Add(new SignUpSettings(SignUpSettings.SiteId));
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
 
         await projector.RebuildAsync(db, cancellationToken: cancellationToken);
         await db.SaveChangesAsync(cancellationToken);

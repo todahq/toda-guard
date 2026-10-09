@@ -71,9 +71,10 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         }, cancellationToken: cancellationToken);
     }
 
-    public sealed record CreateAccountInput(string Username, string DisplayName, string? Email, string Password);
+    /// <summary>A user to create in an internal directory: Toda's own, or another such as Customers (ADR 0037).</summary>
+    public sealed record CreateAccountInput(string Username, string DisplayName, string? Email, string Password, Guid? DirectoryId = null);
 
-    /// <summary>Creates a user in the internal directory.</summary>
+    /// <summary>Creates a user in an internal directory (Toda's own by default).</summary>
     [HttpPost]
     public async Task<AccountDto> Create([FromBody] CreateAccountInput input, CancellationToken cancellationToken)
     {
@@ -89,14 +90,22 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         }
 
         string normalized = GuardConstants.Normalize(input.Username);
+        Guid directoryId = input.DirectoryId ?? GuardConstants.InternalDirectoryId;
         (AccountDto dto, List<object> events) = await guardDb.RunAsync(async db =>
         {
-            if (await db.DirectoryUsers.AnyAsync(u => u.DirectoryId == GuardConstants.InternalDirectoryId && u.NormalizedUsername == normalized, cancellationToken))
+            UserDirectory directory = await db.Directories.FirstOrDefaultAsync(d => d.Id == directoryId, cancellationToken)
+                ?? throw new UserFriendlyException("There's no such directory.");
+            if (!directory.IsInternal)
             {
-                throw new UserFriendlyException($"The internal directory already has a user called '{input.Username}'.");
+                throw new UserFriendlyException($"{directory.Name} keeps its own users: create them there.");
             }
 
-            DirectoryUser user = new(Guid.NewGuid(), GuardConstants.InternalDirectoryId, $"internal:{normalized}", input.Username)
+            if (await db.DirectoryUsers.AnyAsync(u => u.DirectoryId == directoryId && u.NormalizedUsername == normalized, cancellationToken))
+            {
+                throw new UserFriendlyException($"{directory.Name} already has a user called '{input.Username}'.");
+            }
+
+            DirectoryUser user = new(Guid.NewGuid(), directoryId, $"internal:{normalized}", input.Username)
             {
                 DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? input.Username : input.DisplayName.Trim(),
                 Email = input.Email?.Trim(),
@@ -108,6 +117,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
             List<object> events = await projector.RebuildAsync(db, [normalized], cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
 
+            await Organizations.ApplyDomainsAsync(db, cancellationToken);
             Account account = await db.Accounts.FirstAsync(a => a.NormalizedUsername == normalized, cancellationToken);
             string directoryName = await db.Directories.Where(d => d.Id == account.DirectoryId).Select(d => d.Name).FirstAsync(cancellationToken);
             return (AccountDto.From(account, directoryName), events);

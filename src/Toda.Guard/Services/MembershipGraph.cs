@@ -13,7 +13,8 @@ public sealed record EffectiveMember(Account Account, IReadOnlyList<string> Path
 /// <summary>
 /// Resolves nested group membership. Nesting works across directories (an internal group can contain an
 /// LDAP group), because every edge points at a group id. Groups in inactive directories are skipped,
-/// and cycles in synced data are tolerated by tracking visited groups.
+/// and cycles in synced data are tolerated by tracking visited groups. A directory's group (ADR 0037) has no rows:
+/// an account is in it when its directory record is in that directory, so it costs nothing however big.
 ///
 /// The PoC loads the edge list per call; the real build keeps a materialized closure table that sync
 /// and membership changes update, so other modules can join on it.
@@ -31,21 +32,24 @@ public class MembershipGraph(IConfiguration configuration) : ITransientDependenc
         Snapshot snapshot = await LoadAsync(db, cancellationToken);
 
         HashSet<Guid> directoryUserIds = [];
+        HashSet<Guid> directoryIds = [];
         if (account.DirectoryUserId is { } winningId)
         {
             directoryUserIds.Add(winningId);
+            directoryIds.Add(account.DirectoryId);
         }
 
         if (AggregateAcrossDirectories)
         {
-            List<Guid> others = await db.DirectoryUsers
+            var others = await db.DirectoryUsers
                 .Where(u => u.NormalizedUsername == account.NormalizedUsername && snapshot.ActiveDirectoryIds.Contains(u.DirectoryId))
-                .Select(u => u.Id)
+                .Select(u => new { u.Id, u.DirectoryId })
                 .ToListAsync(cancellationToken);
-            directoryUserIds.UnionWith(others);
+            directoryUserIds.UnionWith(others.Select(u => u.Id));
+            directoryIds.UnionWith(others.Select(u => u.DirectoryId));
         }
 
-        return ResolveEffectiveGroups(snapshot, account, directoryUserIds);
+        return ResolveEffectiveGroups(snapshot, account, directoryUserIds, directoryIds);
     }
 
     public async Task<List<EffectiveMember>> GetEffectiveMembersAsync(GuardDbContext db, Guid groupId, CancellationToken cancellationToken = default)
@@ -76,6 +80,40 @@ public class MembershipGraph(IConfiguration configuration) : ITransientDependenc
 
         Dictionary<string, Account> byUsername = accounts.ToDictionary(a => a.NormalizedUsername);
         Dictionary<Guid, EffectiveMember> members = [];
+        void Add(Account account, List<string> path)
+        {
+            if (!members.TryGetValue(account.Id, out EffectiveMember? existing) || existing.Path.Count > path.Count)
+            {
+                members[account.Id] = new EffectiveMember(account, path);
+            }
+        }
+
+        // Directory groups: everyone whose account comes from the directory (and, aggregating, anyone it knows by username).
+        List<Group> directoryGroups = groupPaths.Keys.Select(id => snapshot.Groups[id]).Where(g => g.Kind == GroupKinds.Directory).ToList();
+        if (directoryGroups.Count > 0)
+        {
+            HashSet<Guid> directories = directoryGroups.Select(g => g.DirectoryId).ToHashSet();
+            ILookup<Guid, string> usernamesByDirectory = AggregateAcrossDirectories
+                ? (await db.DirectoryUsers.Where(u => directories.Contains(u.DirectoryId)).Select(u => new { u.DirectoryId, u.NormalizedUsername }).ToListAsync(cancellationToken))
+                    .ToLookup(u => u.DirectoryId, u => u.NormalizedUsername)
+                : Enumerable.Empty<string>().ToLookup(_ => Guid.Empty);
+            foreach (Group group in directoryGroups)
+            {
+                foreach (Account account in accounts.Where(a => a.DirectoryUserId != null && a.DirectoryId == group.DirectoryId))
+                {
+                    Add(account, groupPaths[group.Id]);
+                }
+
+                foreach (string username in usernamesByDirectory[group.DirectoryId])
+                {
+                    if (byUsername.TryGetValue(username, out Account? account))
+                    {
+                        Add(account, groupPaths[group.Id]);
+                    }
+                }
+            }
+        }
+
         foreach (GroupMembership membership in snapshot.Memberships.Where(m => groupPaths.ContainsKey(m.GroupId)))
         {
             Account? account = membership.MemberType switch
@@ -91,11 +129,7 @@ public class MembershipGraph(IConfiguration configuration) : ITransientDependenc
                 continue;
             }
 
-            List<string> path = groupPaths[membership.GroupId];
-            if (!members.TryGetValue(account.Id, out EffectiveMember? existing) || existing.Path.Count > path.Count)
-            {
-                members[account.Id] = new EffectiveMember(account, path);
-            }
+            Add(account, groupPaths[membership.GroupId]);
         }
 
         return members.Values.OrderBy(m => m.Path.Count).ThenBy(m => m.Account.Username).ToList();
@@ -108,8 +142,12 @@ public class MembershipGraph(IConfiguration configuration) : ITransientDependenc
         return FindCycle(snapshot, parentGroupId, childGroupId);
     }
 
-    /// <summary>Pure: the groups an account reaches, each with its shortest path, from an in-memory snapshot.</summary>
-    internal static List<EffectiveGroup> ResolveEffectiveGroups(Snapshot snapshot, Account account, IReadOnlySet<Guid> directoryUserIds)
+    /// <summary>
+    /// Pure: the groups an account reaches, each with its shortest path, from an in-memory snapshot. The directories
+    /// its records come from put it in their directory groups.
+    /// </summary>
+    internal static List<EffectiveGroup> ResolveEffectiveGroups(Snapshot snapshot, Account account, IReadOnlySet<Guid> directoryUserIds,
+        IReadOnlySet<Guid>? directoryIds = null)
     {
         if (account.Status != AccountStatus.Active)
         {
@@ -121,6 +159,7 @@ public class MembershipGraph(IConfiguration configuration) : ITransientDependenc
                      || (m.MemberType == MemberType.Account && m.MemberId == account.Id))
             .Select(m => m.GroupId)
             .Where(snapshot.Groups.ContainsKey)
+            .Concat(snapshot.Groups.Values.Where(g => g.Kind == GroupKinds.Directory && directoryIds?.Contains(g.DirectoryId) == true).Select(g => g.Id))
             .Distinct()
             .ToList();
 

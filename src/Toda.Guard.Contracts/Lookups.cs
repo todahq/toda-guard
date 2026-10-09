@@ -90,3 +90,15 @@ public interface IGrantScopeExpander
 {
     ValueTask<IReadOnlyList<GrantExpansion>> ExpandAsync(System.Text.Json.Nodes.JsonObject scope, CancellationToken cancellationToken = default);
 }
+
+/// <summary>What a grant's scope is, for people: a label, and the page where it's managed (a project's members).</summary>
+public sealed record GrantScopeLabel(string Label, string? Href);
+
+/// <summary>
+/// Lets a module say what its grant scopes are (a scope key such as "project:{id}"), for lists across modules such as
+/// every grant to Anonymous visitors (ADR 0037).
+/// </summary>
+public interface IGrantScopeDescriber
+{
+    Task<IReadOnlyDictionary<string, GrantScopeLabel>> DescribeAsync(IReadOnlyCollection<string> scopeKeys, CancellationToken cancellationToken = default);
+}
