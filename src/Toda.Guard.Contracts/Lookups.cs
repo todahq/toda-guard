@@ -3,7 +3,9 @@ namespace Toda.Guard;
 // Integration services other modules and plugins call. Every reference to a person or group is a GUID:
 // group names are display-only, because two directories may each have a group called "admins".
 
-public sealed record AccountInfo(Guid Id, string Username, string DisplayName, string? Email, bool IsActive, Guid DirectoryId);
+/// <summary>An account as other modules see it; Language and TimeZone are the person's preferences (null: the site's).</summary>
+public sealed record AccountInfo(Guid Id, string Username, string DisplayName, string? Email, bool IsActive, Guid DirectoryId, string? Language = null,
+    string? TimeZone = null);
 
 public sealed record GroupInfo(Guid Id, string Name, string? Description, Guid DirectoryId);
 

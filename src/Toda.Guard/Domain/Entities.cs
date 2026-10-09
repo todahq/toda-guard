@@ -133,6 +133,12 @@ public class Account : Entity<Guid>
 
     public DateTime? LastLoginAt { get; set; }
     public DateTime CreatedAt { get; private set; }
+
+    /// <summary>The person's language (a site language code); null follows the site's default (ADR 0039).</summary>
+    public string? Language { get; set; }
+
+    /// <summary>The person's time zone (IANA or Windows id); null follows the site's.</summary>
+    public string? TimeZone { get; set; }
 }
 
 /// <summary>

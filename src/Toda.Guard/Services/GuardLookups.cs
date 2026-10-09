@@ -45,7 +45,8 @@ public class AccountLookup(GuardDb guardDb) : IAccountLookup, ITransientDependen
             .ToList(), cancellationToken: cancellationToken);
     }
 
-    internal static AccountInfo ToInfo(Account a) => new(a.Id, a.Username, a.DisplayName, a.Email, a.Status == AccountStatus.Active, a.DirectoryId);
+    internal static AccountInfo ToInfo(Account a) => new(a.Id, a.Username, a.DisplayName, a.Email, a.Status == AccountStatus.Active, a.DirectoryId, a.Language,
+        a.TimeZone);
 }
 
 [ExposeServices(typeof(IGroupLookup))]
