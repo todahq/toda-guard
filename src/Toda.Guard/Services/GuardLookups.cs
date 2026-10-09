@@ -33,6 +33,14 @@ public class AccountLookup(GuardDb guardDb) : IAccountLookup, ITransientDependen
             cancellationToken: cancellationToken);
     }
 
+    public Task<IReadOnlyList<AccountInfo>> FindByEmailAsync(string email, CancellationToken cancellationToken = default)
+    {
+        string normalized = GuardConstants.Normalize(email);
+        return guardDb.RunAsync<IReadOnlyList<AccountInfo>>(async db => (await db.Accounts.AsNoTracking()
+                .Where(a => a.Status == AccountStatus.Active && a.Email != null && a.Email.ToLower() == normalized).OrderBy(a => a.Username).Take(10).ToListAsync(cancellationToken))
+            .Select(ToInfo).ToList(), cancellationToken: cancellationToken);
+    }
+
     public Task<IReadOnlyList<AccountInfo>> SearchAsync(string text, int max = 20, CancellationToken cancellationToken = default)
     {
         string normalized = GuardConstants.Normalize(text);
@@ -88,7 +96,7 @@ public class GroupLookup(GuardDb guardDb) : IGroupLookup, ITransientDependency
             .ToList(), cancellationToken: cancellationToken);
     }
 
-    internal static GroupInfo ToInfo(Group g) => new(g.Id, g.Name, g.Description, g.DirectoryId);
+    internal static GroupInfo ToInfo(Group g) => new(g.Id, g.Name, g.Description, g.DirectoryId, g.Kind);
 }
 
 [ExposeServices(typeof(IMembershipResolver))]
@@ -107,7 +115,7 @@ public class MembershipResolver(GuardDb guardDb, MembershipGraph graph) : IMembe
             }
 
             return (await graph.GetEffectiveGroupsAsync(db, account, cancellationToken))
-                .Select(g => new GroupInfo(g.Group.Id, g.Group.Name, g.Group.Description, g.Group.DirectoryId))
+                .Select(g => GroupLookup.ToInfo(g.Group))
                 .ToList();
         }, cancellationToken: cancellationToken);
 
