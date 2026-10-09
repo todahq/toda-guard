@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using Casl;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Data;
@@ -17,7 +18,8 @@ namespace Toda.Guard.Controllers;
 /// </summary>
 [Route("api/query")]
 [Authorize]
-public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMembershipResolver membership, QueryClocks clocks) : GuardControllerBase
+public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMembershipResolver membership, QueryClocks clocks, QueryExports exports,
+    SecurityLog securityLog) : GuardControllerBase
 {
     [HttpPost("accounts")]
     public async Task<QueryResultDto> Accounts([FromBody] EntityQueryInput input, CancellationToken cancellationToken)
@@ -28,6 +30,44 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
             db.Accounts.AsNoTracking().AccessibleBy(ability, "read"), await AccountModelAsync(db, cancellationToken), input, Context(), cancellationToken),
             cancellationToken: cancellationToken);
     }
+
+    /// <summary>The accounts list as a file (ADR 0043), inside the same rules as the list.</summary>
+    [HttpPost("accounts/export")]
+    [ProducesResponseType(typeof(Stream), StatusCodes.Status200OK, QueryExports.CsvContentType, QueryExports.XlsxContentType)]
+    public Task ExportAccounts([FromBody] EntityExportInput input, CancellationToken cancellationToken) =>
+        ExportAsync("accounts", input, ability => Ensure(ability, "read", "Account"),
+            (db, ability) => db.Accounts.AsNoTracking().AccessibleBy(ability, "read"), db => AccountModelAsync(db, cancellationToken), cancellationToken);
+
+    /// <summary>The groups list as a file (ADR 0043).</summary>
+    [HttpPost("groups/export")]
+    [ProducesResponseType(typeof(Stream), StatusCodes.Status200OK, QueryExports.CsvContentType, QueryExports.XlsxContentType)]
+    public Task ExportGroups([FromBody] EntityExportInput input, CancellationToken cancellationToken) =>
+        ExportAsync("groups", input, null, (db, _) => db.Groups.AsNoTracking(), db => GroupModelAsync(db, cancellationToken), cancellationToken);
+
+    /// <summary>
+    /// An export of one of guard's lists: checked as the list is (<paramref name="check"/>), then run as the list runs, in
+    /// one snapshot, and written to the security log as its download starts.
+    /// </summary>
+    private Task ExportAsync<T>(string entity, EntityExportInput input, Action<Ability>? check, Func<GuardDbContext, Ability, IQueryable<T>> rows,
+        Func<GuardDbContext, Task<EntityQueryModel<T>>> model, CancellationToken cancellationToken) =>
+        QueryExports.RunAsync(HttpContext, Logger, async () =>
+        {
+            Ability ability = await AbilityAsync(cancellationToken);
+            check?.Invoke(ability);
+            QueryExportFormat format = QueryExports.Format(input.Format);
+            AccountInfo? me = await accounts.GetAsync(CurrentAccountId, cancellationToken);
+            ExportFormatting formatting = await exports.FormattingAsync(input.TimeZone, me?.TimeZone, cancellationToken);
+            await guardDb.RunAsync(async db =>
+            {
+                await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction snapshot = await QueryExports.SnapshotAsync(db, cancellationToken);
+                return await EntityQueryEngine.ExportAsync(rows(db, ability), await model(db), input, Context(), exports.Limit(input.MaxRows), formatting, async (head, ct) =>
+                {
+                    await securityLog.ExportedAsync(me, CurrentAccountId, ClientIp, entity, null, EntityQueryEngine.Rql(input), input.Columns, format.ToString().ToLowerInvariant(), head, ct);
+                    string sheet = char.ToUpperInvariant(entity[0]) + entity[1..];
+                    return await QueryExports.StartAsync(Response, format, QueryExports.FileStem(entity, null, formatting.Zone), sheet, head, ct);
+                }, cancellationToken);
+            }, cancellationToken: cancellationToken);
+        });
 
     [HttpGet("accounts/fields")]
     public async Task<List<QueryFieldDto>> AccountFields(CancellationToken cancellationToken)
