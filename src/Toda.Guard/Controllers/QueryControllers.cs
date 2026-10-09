@@ -17,7 +17,7 @@ namespace Toda.Guard.Controllers;
 /// </summary>
 [Route("api/query")]
 [Authorize]
-public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMembershipResolver membership) : GuardControllerBase
+public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMembershipResolver membership, QueryClocks clocks) : GuardControllerBase
 {
     [HttpPost("accounts")]
     public async Task<QueryResultDto> Accounts([FromBody] EntityQueryInput input, CancellationToken cancellationToken)
@@ -62,7 +62,8 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
         CurrentAccountId,
         async (username, ct) => (await accounts.FindByUsernameAsync(username, ct))?.Id,
         async (text, max, ct) => (await accounts.SearchAsync(text, max, ct)).Select(a => (a.Username, a.DisplayName)).ToList(),
-        membership.GetEffectiveMemberIdsAsync);
+        membership.GetEffectiveMemberIdsAsync,
+        Clock: ct => clocks.ForAsync(CurrentAccountId, ct));
 
     private static async Task<EntityField<T>> DirectoryAsync<T>(GuardDbContext db, Expression<Func<T, Guid>> member, Func<T, Guid> id, CancellationToken ct)
     {

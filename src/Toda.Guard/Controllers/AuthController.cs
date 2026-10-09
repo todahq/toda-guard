@@ -7,14 +7,17 @@ using Toda.Guard.Services;
 
 namespace Toda.Guard.Controllers;
 
-/// <summary>The person's language and time zone; null follows the site's (ADR 0039).</summary>
-public sealed record PreferencesDto(string? Language, string? TimeZone, string SiteTimeZone);
+/// <summary>
+/// The person's language and time zone; null follows the site's (ADR 0039). Weeks start on the site's first day for
+/// everyone (ADR 0013): sunday, monday…
+/// </summary>
+public sealed record PreferencesDto(string? Language, string? TimeZone, string SiteTimeZone, string FirstDayOfWeek);
 
 public sealed record PreferencesInput(string? Language, string? TimeZone);
 
 [Route("api/guard")]
 public class AuthController(GuardDb guardDb, MembershipGraph graph, Toda.Platform.Localization.LocalizationCache localization,
-    Microsoft.Extensions.Configuration.IConfiguration configuration) : GuardControllerBase
+    Toda.Platform.SiteCalendar calendar) : GuardControllerBase
 {
     /// <summary>Sets the person's language and time zone; null (or empty) goes back to the site's.</summary>
     [HttpPut("me/preferences")]
@@ -45,8 +48,7 @@ public class AuthController(GuardDb guardDb, MembershipGraph graph, Toda.Platfor
     }
 
     private PreferencesDto Preferences(Account account) =>
-        new(account.Language, account.TimeZone,
-            configuration["Toda:TimeZone"] is { Length: > 0 } site && TimeZoneInfo.TryFindSystemTimeZoneById(site, out _) ? site : "UTC");
+        new(account.Language, account.TimeZone, calendar.TimeZone, calendar.FirstDayOfWeek.ToString().ToLowerInvariant());
 
     [HttpGet("me")]
     [Authorize]
