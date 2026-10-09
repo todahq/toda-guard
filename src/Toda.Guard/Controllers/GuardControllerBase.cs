@@ -28,6 +28,13 @@ public abstract class GuardControllerBase : AbpControllerBase
     protected Task<Casl.Ability> AbilityAsync(CancellationToken cancellationToken = default) =>
         HttpContext.RequestServices.GetRequiredService<AbilityFactory>().ForAccountAsync(CurrentAccountId, cancellationToken);
 
+    /// <summary>Whether someone is signed in (an anonymous portal visitor isn't).</summary>
+    protected bool SignedIn => Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub"), out _);
+
+    /// <summary>The caller's ability, or for a visitor who isn't signed in, what's granted to the Anonymous principal (ADR 0037).</summary>
+    protected Task<Casl.Ability> AbilityOrAnonymousAsync(CancellationToken cancellationToken = default) =>
+        SignedIn ? AbilityAsync(cancellationToken) : HttpContext.RequestServices.GetRequiredService<AbilityFactory>().ForAnonymousAsync(cancellationToken);
+
     /// <summary>403 with the rule's reason when the ability denies the action on this object.</summary>
     protected static void Ensure(Casl.Ability ability, string action, object subject, string? field = null)
     {

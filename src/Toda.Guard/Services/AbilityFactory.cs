@@ -34,9 +34,10 @@ public static class GuardSubjects
 /// <summary>
 /// Builds an account's <see cref="Ability"/> from the roles granted to it directly or to any of its effective
 /// groups (nested groups count). Each grant's scope fills that grant's ${grant.*} placeholders.
-/// Built once per request.
+/// Kept between requests while the permission stamp stays the same (ADR 0041), and within a request once read.
 /// </summary>
-public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<AbilityFactory> logger, IEnumerable<IGrantScopeExpander> expanders) : IScopedDependency
+public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<AbilityFactory> logger, IEnumerable<IGrantScopeExpander> expanders, AbilityCache kept)
+    : IScopedDependency
 {
     private readonly Dictionary<Guid, Ability> _cache = [];
 
@@ -49,12 +50,20 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
             return cached;
         }
 
-        Ability ability = await guardDb.RunAsync(async db =>
+        // The stamp is read before anything the ability is built from, so an ability is never kept under a stamp newer
+        // than its data.
+        long stamp = await StampAsync(cancellationToken);
+        if (kept.TryGet(accountId, stamp, out Ability keptAbility))
+        {
+            return _cache[accountId] = keptAbility;
+        }
+
+        (Ability ability, DateTime? until) = await guardDb.RunAsync(async db =>
         {
             Account? account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId, cancellationToken);
             if (account is null || account.Status != AccountStatus.Active)
             {
-                return None;
+                return (None, (DateTime?)null);
             }
 
             List<Guid> groupIds = (await graph.GetEffectiveGroupsAsync(db, account, cancellationToken)).Select(g => g.Group.Id).ToList();
@@ -66,9 +75,15 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
                 .Where(g => g.ValidUntil == null || g.ValidUntil > now)
                 .ToListAsync(cancellationToken);
             object user = new { user = new { id = account.Id, username = account.Username, directoryId = account.DirectoryId, groupIds } };
-            return await BuildAsync(db, grants, user, account.Id, cancellationToken);
+            // What Anonymous visitors are granted, everyone gets; but its denies (a customer role's hidden fields) are for
+            // people it's all they have there, not for the team that also has a role of its own in that scope.
+            HashSet<string?> ownScopes = grants.Where(g => g.PrincipalType != PrincipalType.Anonymous).Select(g => g.ScopeKey).ToHashSet();
+            bool siteWide = ownScopes.Contains(null); // a site role (an administrator's) is theirs everywhere
+            HashSet<Guid> allowOnly = grants.Where(g => g.PrincipalType == PrincipalType.Anonymous && (siteWide || ownScopes.Contains(g.ScopeKey))).Select(g => g.Id).ToHashSet();
+            return (await BuildAsync(db, grants, user, account.Id, cancellationToken, allowOnly), Until(grants));
         }, cancellationToken: cancellationToken);
 
+        kept.Set(accountId, stamp, ability, until);
         _cache[accountId] = ability;
         return ability;
     }
@@ -84,22 +99,41 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
             return cached;
         }
 
-        Ability ability = await guardDb.RunAsync(async db =>
+        long stamp = await StampAsync(cancellationToken);
+        if (kept.TryGet(GuardConstants.AnonymousId, stamp, out Ability keptAbility))
+        {
+            return _cache[GuardConstants.AnonymousId] = keptAbility;
+        }
+
+        (Ability ability, DateTime? until) = await guardDb.RunAsync(async db =>
         {
             DateTime now = DateTime.UtcNow;
             List<RoleGrant> grants = await db.RoleGrants.AsNoTracking()
                 .Where(g => g.PrincipalType == PrincipalType.Anonymous && (g.ValidUntil == null || g.ValidUntil > now))
                 .ToListAsync(cancellationToken);
             object user = new { user = new { id = GuardConstants.AnonymousId, username = "", directoryId = Guid.Empty, groupIds = new List<Guid>() } };
-            return grants.Count == 0 ? None : await BuildAsync(db, grants, user, GuardConstants.AnonymousId, cancellationToken);
+            return (grants.Count == 0 ? None : await BuildAsync(db, grants, user, GuardConstants.AnonymousId, cancellationToken), Until(grants));
         }, cancellationToken: cancellationToken);
 
+        kept.Set(GuardConstants.AnonymousId, stamp, ability, until);
         _cache[GuardConstants.AnonymousId] = ability;
         return ability;
     }
 
+    /// <summary>
+    /// The permission stamp (ADR 0041), read for each person a request needs (not once for the request: one that changes
+    /// someone's grants and then asks for their ability sees the stamp its change moved on).
+    /// </summary>
+    private Task<long> StampAsync(CancellationToken cancellationToken) =>
+        guardDb.RunAsync(db => db.PermissionStamps.AsNoTracking().Where(s => s.Id == PermissionStamp.RowId).Select(s => s.Version).FirstOrDefaultAsync(cancellationToken),
+            cancellationToken: cancellationToken);
+
+    /// <summary>When an ability built from these grants stops being right on its own: the first "valid until" among them.</summary>
+    private static DateTime? Until(List<RoleGrant> grants) => grants.Where(g => g.ValidUntil != null).Min(g => g.ValidUntil);
+
     /// <summary>The ability the grants give, each grant in its own scope and in any scope a module widens it to.</summary>
-    private async Task<Ability> BuildAsync(Data.GuardDbContext db, List<RoleGrant> grants, object user, Guid subject, CancellationToken cancellationToken)
+    private async Task<Ability> BuildAsync(Data.GuardDbContext db, List<RoleGrant> grants, object user, Guid subject, CancellationToken cancellationToken,
+        IReadOnlySet<Guid>? allowOnly = null)
     {
         List<Guid> roleIds = grants.Select(g => g.RoleId).Distinct().ToList();
         ILookup<Guid, string> ruleJson = (await db.RoleRules.AsNoTracking().Where(r => roleIds.Contains(r.RoleId)).OrderBy(r => r.Order).ToListAsync(cancellationToken))
@@ -143,6 +177,10 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
         {
             object scope = new { grant = grantScope };
             List<RawRule> grantRules = ReferenceEquals(grantScope, ownScopes[grant.Id]) ? rules[grant.RoleId].ToList() : Widened(grant.RoleId, readOnly, grantScope);
+            if (allowOnly?.Contains(grant.Id) == true)
+            {
+                grantRules = grantRules.Where(r => !r.Inverted).ToList();
+            }
             if (grantRules.Count == 0)
             {
                 continue;

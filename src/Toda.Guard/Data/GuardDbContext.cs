@@ -21,6 +21,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     public DbSet<RoleRule> RoleRules => Set<RoleRule>();
     public DbSet<RoleGrant> RoleGrants => Set<RoleGrant>();
     public DbSet<SignUpSettings> SignUpSettings => Set<SignUpSettings>();
+    public DbSet<PermissionStamp> PermissionStamps => Set<PermissionStamp>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -123,6 +124,13 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.HasIndex(x => new { x.PrincipalType, x.PrincipalId });
             b.HasIndex(x => x.ScopeKey);
             b.HasIndex(x => x.RoleId);
+        });
+
+        builder.Entity<PermissionStamp>(b =>
+        {
+            b.ToTable("permission_stamp");
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.HasData(new PermissionStamp { Id = PermissionStamp.RowId, Version = 0 });
         });
 
         builder.Entity<SignUpSettings>(b =>

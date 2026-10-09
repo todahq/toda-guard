@@ -94,3 +94,15 @@ public class RoleGrant : Entity<Guid>
     public DateTime CreatedAt { get; private set; }
     public Guid? CreatedBy { get; set; }
 }
+
+/// <summary>
+/// One row whose version goes up, in the same transaction, with every write to what abilities are built from (ADR 0041):
+/// database triggers on those tables do it. A kept ability is used only while the version it was built under is current.
+/// </summary>
+public class PermissionStamp
+{
+    public const int RowId = 1;
+
+    public int Id { get; set; }
+    public long Version { get; set; }
+}

@@ -97,8 +97,8 @@ public static class SelfServiceMail
 /// directories). Links carry a token from Data Protection that expires, and a reset token is spent once the password
 /// changes. Answers never say whether an email has an account, except sign-up, which has to.
 /// </summary>
-public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IChannels channels, IConfiguration configuration)
-    : ITransientDependency
+public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IChannels channels, IConfiguration configuration,
+    IEventPublisher events) : ITransientDependency
 {
     public static readonly TimeSpan VerifyFor = TimeSpan.FromHours(72);
     public static readonly TimeSpan ResetFor = TimeSpan.FromHours(1);
@@ -233,6 +233,53 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
             await Organizations.ApplyDomainsAsync(db, ct);
             return (user.Username, events);
         }, requiresNew: true, ct, isTransactional: true);
+    }
+
+    /// <summary>
+    /// The account for someone who confirmed an email (an anonymous portal request, ADR 0038): the one active account
+    /// with it, else a new one where sign-up allows that address (active: the confirmation verified it; no password until
+    /// they set one with a reset), else none.
+    /// </summary>
+    public async Task<Guid?> AccountForConfirmedEmailAsync(string email, string name, CancellationToken ct)
+    {
+        string normalized = GuardConstants.Normalize(email);
+        string? domain = Organizations.DomainOf(email);
+        (Guid? id, List<object> created) = await guardDb.RunAsync(async db =>
+        {
+            List<Account> owners = await db.Accounts.Where(a => a.Status == AccountStatus.Active && a.Email != null && a.Email.ToLower() == normalized).ToListAsync(ct);
+            if (owners.Count > 0)
+            {
+                return (owners.Count == 1 ? owners[0].Id : (Guid?)null, new List<object>());
+            }
+
+            SignUpSettings s = await LoadAsync(db, ct);
+            UserDirectory? directory = s.Enabled && s.DirectoryId is { } directoryId
+                ? await db.Directories.FirstOrDefaultAsync(d => d.Id == directoryId && d.IsActive && d.AuthenticationEnabled, ct)
+                : null;
+            if (directory is null || domain is null || (s.EmailDomains.Count > 0 && !s.EmailDomains.Contains(domain))
+                || await db.Accounts.AnyAsync(a => a.NormalizedUsername == normalized, ct) || await db.DirectoryUsers.AnyAsync(u => u.NormalizedUsername == normalized, ct))
+            {
+                return ((Guid?)null, new List<object>());
+            }
+
+            DirectoryUser user = db.DirectoryUsers.Add(new DirectoryUser(Guid.NewGuid(), directory.Id, $"internal:{normalized}", email.Trim())
+            {
+                DisplayName = string.IsNullOrWhiteSpace(name) ? email.Trim() : name.Trim(),
+                Email = email.Trim(),
+            }).Entity;
+            await db.SaveChangesAsync(ct);
+            List<object> events = await projector.RebuildAsync(db, [normalized], ct);
+            await db.SaveChangesAsync(ct);
+            await Organizations.ApplyDomainsAsync(db, ct);
+            return ((Guid?)await db.Accounts.Where(a => a.NormalizedUsername == normalized).Select(a => a.Id).FirstAsync(ct), events);
+        }, requiresNew: true, ct, isTransactional: true);
+
+        foreach (object e in created)
+        {
+            await Controllers.GuardEvents.PublishAsync(events, e, ct);
+        }
+
+        return id;
     }
 
     /// <summary>Mails a reset link to each active account Toda keeps with this email; nothing for anyone else, and says nothing either way.</summary>

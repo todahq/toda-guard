@@ -232,6 +232,26 @@ namespace Toda.Guard.Data.Migrations
                     b.ToTable("memberships", "guard");
                 });
 
+            modelBuilder.Entity("Toda.Guard.Domain.PermissionStamp", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("permission_stamp", "guard");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Version = 0L
+                        });
+                });
+
             modelBuilder.Entity("Toda.Guard.Domain.Role", b =>
                 {
                     b.Property<Guid>("Id")
