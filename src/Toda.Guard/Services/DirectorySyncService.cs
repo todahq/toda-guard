@@ -20,6 +20,7 @@ public class DirectorySyncService(
     ConnectorCatalog connectors,
     AccountProjector projector,
     IEventPublisher events,
+    AccountMergeService merges,
     ILogger<DirectorySyncService> logger) : ITransientDependency
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> Locks = new();
@@ -121,6 +122,12 @@ public class DirectorySyncService(
         foreach (object e in pending)
         {
             await PublishAsync(e, cancellationToken);
+        }
+
+        if (run.Succeeded == true)
+        {
+            // Someone a placeholder stood for may have arrived with this sync (ADR 0044).
+            await merges.FoldPlaceholdersAsync(MergeReasons.DirectorySync, cancellationToken);
         }
 
         await events.PublishAsync(new DirectorySyncCompletedEto(
@@ -251,6 +258,7 @@ public class DirectorySyncService(
         AccountUpdatedEto x => events.PublishAsync(x, cancellationToken),
         AccountDeactivatedEto x => events.PublishAsync(x, cancellationToken),
         AccountReactivatedEto x => events.PublishAsync(x, cancellationToken),
+        AccountMergedEto x => events.PublishAsync(x, cancellationToken),
         GroupCreatedEto x => events.PublishAsync(x, cancellationToken),
         MembershipChangedEto x => events.PublishAsync(x, cancellationToken),
         _ => Task.CompletedTask,

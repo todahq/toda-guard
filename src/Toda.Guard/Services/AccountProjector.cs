@@ -59,6 +59,12 @@ public class AccountProjector : ITransientDependency
         {
             AccountStatus before = orphan.Status;
             orphan.DirectoryUserId = null;
+            if (orphan.MergedIntoId is not null)
+            {
+                orphan.Status = AccountStatus.Inactive; // merged (ADR 0044): its reason names the survivor
+                continue;
+            }
+
             orphan.Status = orphan.LockedLocally ? AccountStatus.Locked : AccountStatus.Inactive;
             orphan.StatusReason = orphan.LockedLocally ? "Locked in Toda" : "Not found in any active directory";
             AddStatusEvents(events, orphan, before);
@@ -80,13 +86,19 @@ public class AccountProjector : ITransientDependency
             .ToDictionary(g => g.Key, g => g.OrderBy(u => active[u.DirectoryId].Order).ThenBy(u => u.DirectoryId).First());
     }
 
-    private static void Apply(Account account, DirectoryUser winner, UserDirectory directory)
+    internal static void Apply(Account account, DirectoryUser winner, UserDirectory directory)
     {
         account.Username = winner.Username;
         account.DisplayName = string.IsNullOrWhiteSpace(winner.DisplayName) ? winner.Username : winner.DisplayName!;
         account.Email = winner.Email;
         account.DirectoryId = directory.Id;
         account.DirectoryUserId = winner.Id;
+        if (account.MergedIntoId is not null)
+        {
+            // Merged into another account (ADR 0044): the directory may still report it, but it never comes back.
+            account.Status = AccountStatus.Inactive;
+            return;
+        }
 
         (account.Status, account.StatusReason) = account.LockedLocally
             ? (AccountStatus.Locked, "Locked in Toda")

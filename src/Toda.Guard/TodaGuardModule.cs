@@ -102,6 +102,7 @@ public class TodaGuardModule : AbpModule
         Toda.Platform.Templates.TemplateCatalog templates = context.ServiceProvider.GetRequiredService<Toda.Platform.Templates.TemplateCatalog>();
         templates.Register(SelfServiceMail.VerifyDefinition);
         templates.Register(SelfServiceMail.ResetDefinition);
+        templates.Register(AddressMail.VerifyDefinition);
     }
 }
 

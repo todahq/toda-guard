@@ -28,13 +28,13 @@ public class AccountProvisioning(GuardDb guardDb, AccountProjector projector) : 
             Account? byName = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.NormalizedUsername == normalized, cancellationToken);
             if (byName is not null)
             {
-                return new ProvisionedAccount(byName.Id, "username");
+                return new ProvisionedAccount(byName.MergedIntoId ?? byName.Id, "username"); // a merged account lives on in its survivor (ADR 0044)
             }
 
             if (!string.IsNullOrWhiteSpace(email))
             {
-                string lower = email.Trim().ToLowerInvariant();
-                List<Guid> byEmail = await db.Accounts.AsNoTracking().Where(a => a.Email != null && a.Email.ToLower() == lower).Select(a => a.Id).Take(2).ToListAsync(cancellationToken);
+                string lower = GuardConstants.Normalize(email);
+                List<Guid> byEmail = await Addresses.WithAddress(db, lower).AsNoTracking().Select(a => a.Id).Take(2).ToListAsync(cancellationToken);
                 if (byEmail.Count == 1)
                 {
                     return new ProvisionedAccount(byEmail[0], "email");

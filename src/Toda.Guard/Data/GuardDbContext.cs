@@ -22,11 +22,15 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     public DbSet<RoleGrant> RoleGrants => Set<RoleGrant>();
     public DbSet<SignUpSettings> SignUpSettings => Set<SignUpSettings>();
     public DbSet<PermissionStamp> PermissionStamps => Set<PermissionStamp>();
+    public DbSet<AccountEmail> AccountEmails => Set<AccountEmail>();
+    public DbSet<AccountMergeRecord> Merges => Set<AccountMergeRecord>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
         builder.HasDefaultSchema(Schema);
+        builder.Ignore<MergeStep>(); // stored inside account_merges.Steps as JSON, never as entities of their own
+        builder.Ignore<MergeStepCount>();
 
         builder.Entity<UserDirectory>(b =>
         {
@@ -56,7 +60,43 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
             b.Property(x => x.Language).HasMaxLength(35);
             b.Property(x => x.TimeZone).HasMaxLength(64);
+            b.Property(x => x.MailTo).HasMaxLength(320);
+            b.Ignore(x => x.MailAddress);
             b.HasIndex(x => x.NormalizedUsername).IsUnique();
+            b.HasIndex(x => x.MergedIntoId);
+        });
+
+        builder.Entity<AccountEmail>(b =>
+        {
+            b.ToTable("account_emails");
+            b.Property(x => x.Email).HasMaxLength(320).IsRequired();
+            b.Property(x => x.NormalizedEmail).HasMaxLength(320).IsRequired();
+            b.Property(x => x.Source).HasMaxLength(16).IsRequired();
+            b.HasIndex(x => new { x.AccountId, x.NormalizedEmail }).IsUnique();
+            // A verified address belongs to one account (ADR 0044); addresses waiting for their link don't hold it.
+            b.HasIndex(x => x.NormalizedEmail, "IX_account_emails_verified").IsUnique().HasFilter("\"VerifiedAt\" IS NOT NULL");
+        });
+
+        builder.Entity<AccountMergeRecord>(b =>
+        {
+            b.ToTable("account_merges");
+            b.Property(x => x.SourceUsername).HasMaxLength(256).IsRequired();
+            b.Property(x => x.SourceDisplayName).HasMaxLength(256).IsRequired();
+            b.Property(x => x.SourceEmail).HasMaxLength(320);
+            b.Property(x => x.SurvivorUsername).HasMaxLength(256).IsRequired();
+            b.Property(x => x.Reason).HasMaxLength(32).IsRequired();
+            b.Property(x => x.State).HasMaxLength(16).IsRequired();
+            System.Text.Json.JsonSerializerOptions json = new(System.Text.Json.JsonSerializerDefaults.Web);
+            b.Property(x => x.Steps).HasColumnType("jsonb").HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v, json),
+                v => System.Text.Json.JsonSerializer.Deserialize<List<MergeStep>>(v, json) ?? new(),
+                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<List<MergeStep>>(
+                    (a, b) => System.Text.Json.JsonSerializer.Serialize(a, json) == System.Text.Json.JsonSerializer.Serialize(b, json),
+                    v => System.Text.Json.JsonSerializer.Serialize(v, json).GetHashCode(),
+                    v => System.Text.Json.JsonSerializer.Deserialize<List<MergeStep>>(System.Text.Json.JsonSerializer.Serialize(v, json), json)!));
+            b.HasIndex(x => x.SourceId);
+            b.HasIndex(x => x.SurvivorId);
+            b.HasIndex(x => x.StartedAt);
         });
 
         builder.Entity<Group>(b =>

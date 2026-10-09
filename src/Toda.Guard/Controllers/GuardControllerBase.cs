@@ -76,6 +76,7 @@ public static class GuardEvents
         AccountUpdatedEto x => publisher.PublishAsync(x, cancellationToken),
         AccountDeactivatedEto x => publisher.PublishAsync(x, cancellationToken),
         AccountReactivatedEto x => publisher.PublishAsync(x, cancellationToken),
+        AccountMergedEto x => publisher.PublishAsync(x, cancellationToken),
         GroupCreatedEto x => publisher.PublishAsync(x, cancellationToken),
         MembershipChangedEto x => publisher.PublishAsync(x, cancellationToken),
         DirectorySyncCompletedEto x => publisher.PublishAsync(x, cancellationToken),
@@ -85,12 +86,13 @@ public static class GuardEvents
 
 // ---- DTOs (see docs/api.md) ----
 
+/// <summary>An account; MergedIntoId is the account it was merged into (ADR 0044), MailTo the address mail goes to when it isn't Email.</summary>
 public sealed record AccountDto(
     Guid Id, string Username, string DisplayName, string? Email, string Status, string? StatusReason,
-    Guid DirectoryId, string DirectoryName, DateTime? LastLoginAt)
+    Guid DirectoryId, string DirectoryName, DateTime? LastLoginAt, Guid? MergedIntoId = null, string? MailTo = null)
 {
     public static AccountDto From(Account a, string directoryName) =>
-        new(a.Id, a.Username, a.DisplayName, a.Email, a.Status.ToString(), a.StatusReason, a.DirectoryId, directoryName, a.LastLoginAt);
+        new(a.Id, a.Username, a.DisplayName, a.Email, a.Status.ToString(), a.StatusReason, a.DirectoryId, directoryName, a.LastLoginAt, a.MergedIntoId, a.MailTo);
 }
 
 public sealed record IdentityDto(
@@ -99,7 +101,9 @@ public sealed record IdentityDto(
 
 public sealed record EffectiveGroupDto(Guid GroupId, string Name, Guid DirectoryId, string DirectoryName, bool Direct, IReadOnlyList<string> Path);
 
-public sealed record AccountDetailDto(AccountDto Account, List<IdentityDto> Identities, List<EffectiveGroupDto> Groups);
+/// <summary>An account with its directory records, groups, addresses (ADR 0044) and the merges it was in, newest first.</summary>
+public sealed record AccountDetailDto(AccountDto Account, List<IdentityDto> Identities, List<EffectiveGroupDto> Groups, AccountEmailsDto Addresses,
+    List<AccountMergeDto> Merges, string? MergedIntoUsername);
 
 /// <summary>
 /// A group: Kind (standard, directory, ou, organization, ADR 0037); Computed when Toda works out its members (a directory's

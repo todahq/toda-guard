@@ -148,6 +148,21 @@ public class Account : Entity<Guid>
 
     /// <summary>The person's time zone (IANA or Windows id); null follows the site's.</summary>
     public string? TimeZone { get; set; }
+
+    /// <summary>
+    /// The account this one was merged into (ADR 0044): it stays inactive, keeps its username, and lookups follow this to
+    /// the survivor. Null for everyone else.
+    /// </summary>
+    public Guid? MergedIntoId { get; set; }
+
+    /// <summary>
+    /// Where mail goes when it isn't the directory's address: one of the account's verified addresses (ADR 0044). Null
+    /// means the directory's.
+    /// </summary>
+    public string? MailTo { get; set; }
+
+    /// <summary>The address mail goes to: the one chosen, else the directory's.</summary>
+    public string? MailAddress => MailTo ?? Email;
 }
 
 /// <summary>

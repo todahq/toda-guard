@@ -15,7 +15,8 @@ namespace Toda.Guard.Controllers;
 /// </summary>
 [Route("api/guard/accounts")]
 [Authorize]
-public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountProjector projector) : GuardControllerBase
+public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountProjector projector, AccountMergeService merges, AccountEmailService emails)
+    : GuardControllerBase
 {
     [HttpGet]
     public async Task<List<AccountDto>> List([FromQuery] string? search, [FromQuery] string? status, CancellationToken cancellationToken)
@@ -47,6 +48,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     public async Task<AccountDetailDto> Get(Guid id, CancellationToken cancellationToken)
     {
         Casl.Ability ability = await AbilityAsync(cancellationToken);
+        List<AccountMergeDto> merged = await merges.ListAsync(id, 50, cancellationToken);
         return await guardDb.RunAsync(async db =>
         {
             Account account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, cancellationToken)
@@ -67,7 +69,9 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
                 .Select(g => new EffectiveGroupDto(g.Group.Id, g.Group.Name, g.Group.DirectoryId, directories[g.Group.DirectoryId].Name, g.Direct, g.Path))
                 .ToList();
 
-            return new AccountDetailDto(AccountDto.From(account, directories[account.DirectoryId].Name), identities, groups);
+            string? into = account.MergedIntoId is { } survivor ? await db.Accounts.Where(a => a.Id == survivor).Select(a => a.Username).FirstOrDefaultAsync(cancellationToken) : null;
+            return new AccountDetailDto(AccountDto.From(account, directories[account.DirectoryId].Name), identities, groups,
+                await AccountEmailService.LoadAsync(db, id, cancellationToken), merged, into);
         }, cancellationToken: cancellationToken);
     }
 
@@ -124,6 +128,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         }, requiresNew: true, cancellationToken, isTransactional: true);
 
         await PublishAsync(events);
+        await merges.FoldPlaceholdersAsync(MergeReasons.AccountCreated, cancellationToken); // a placeholder with this address joins them (ADR 0044)
         return dto;
     }
 
@@ -156,5 +161,153 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
         await PublishAsync(events);
         return dto;
+    }
+
+    // ---- Addresses (ADR 0044): an admin's are verified at once ----
+
+    [HttpGet("{id:guid}/emails")]
+    public async Task<AccountEmailsDto> Emails(Guid id, CancellationToken cancellationToken)
+    {
+        Ensure(await AbilityAsync(cancellationToken), "read", await AccountAsync(id, cancellationToken));
+        return await emails.ListAsync(id, cancellationToken);
+    }
+
+    /// <summary>Adds an address, verified; a placeholder with it is merged into this account.</summary>
+    [HttpPost("{id:guid}/emails")]
+    public async Task<AccountEmailsDto> AddEmail(Guid id, [FromBody] AddEmailInput input, CancellationToken cancellationToken)
+    {
+        Ensure(await AbilityAsync(cancellationToken), "update", await AccountAsync(id, cancellationToken));
+        return await emails.AddVerifiedAsync(id, input.Email, CurrentAccountId, cancellationToken);
+    }
+
+    [HttpDelete("{id:guid}/emails/{emailId:guid}")]
+    public async Task<AccountEmailsDto> RemoveEmail(Guid id, Guid emailId, CancellationToken cancellationToken)
+    {
+        Ensure(await AbilityAsync(cancellationToken), "update", await AccountAsync(id, cancellationToken));
+        return await emails.RemoveAsync(id, emailId, cancellationToken);
+    }
+
+    /// <summary>Where mail goes: one of the account's verified addresses, or null for its directory's.</summary>
+    [HttpPut("{id:guid}/mail-to")]
+    public async Task<AccountEmailsDto> MailTo(Guid id, [FromBody] MailToInput input, CancellationToken cancellationToken)
+    {
+        Ensure(await AbilityAsync(cancellationToken), "update", await AccountAsync(id, cancellationToken));
+        return await emails.SetMailToAsync(id, input.Email, cancellationToken);
+    }
+
+    // ---- Merging (ADR 0044) ----
+
+    /// <summary>Addresses more than one account has: candidates to merge.</summary>
+    [HttpGet("duplicates")]
+    public async Task<List<DuplicateDto>> Duplicates(CancellationToken cancellationToken)
+    {
+        Ensure(await AbilityAsync(cancellationToken), "merge", "Account");
+        return await merges.DuplicatesAsync(cancellationToken);
+    }
+
+    /// <summary>What merging this account into another would move, without moving anything.</summary>
+    [HttpPost("{id:guid}/merge/preview")]
+    public async Task<MergePreviewDto> PreviewMerge(Guid id, [FromBody] MergeInput input, CancellationToken cancellationToken)
+    {
+        await EnsureMergeAsync(id, input.SurvivorId, cancellationToken);
+        return await merges.PreviewAsync(id, input.SurvivorId, CurrentAccountId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Merges this account into another: everything it did, owns or is named in moves there, and it stays inactive. An
+    /// account that can sign in needs Confirm to be its username.
+    /// </summary>
+    [HttpPost("{id:guid}/merge")]
+    public async Task<AccountMergeDto> Merge(Guid id, [FromBody] MergeInput input, CancellationToken cancellationToken)
+    {
+        await EnsureMergeAsync(id, input.SurvivorId, cancellationToken);
+        return await merges.MergeAsync(id, input.SurvivorId, CurrentAccountId, MergeReasons.Admin, input.Confirm, cancellationToken);
+    }
+
+    private async Task EnsureMergeAsync(Guid sourceId, Guid survivorId, CancellationToken cancellationToken)
+    {
+        Casl.Ability ability = await AbilityAsync(cancellationToken);
+        Ensure(ability, "merge", await AccountAsync(sourceId, cancellationToken));
+        Ensure(ability, "merge", await AccountAsync(survivorId, cancellationToken));
+    }
+
+    private Task<Account> AccountAsync(Guid id, CancellationToken cancellationToken) => guardDb.RunAsync(async db =>
+        await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, cancellationToken) ?? throw new EntityNotFoundException(typeof(Account), id),
+        cancellationToken: cancellationToken);
+}
+
+/// <summary>Merges as recorded (ADR 0044): every one, or an account's; and resuming one a plugin didn't finish.</summary>
+[Route("api/guard/merges")]
+[Authorize]
+public class MergesController(AccountMergeService merges) : GuardControllerBase
+{
+    [HttpGet]
+    public async Task<List<AccountMergeDto>> List([FromQuery] Guid? accountId, [FromQuery] int take = 100, CancellationToken cancellationToken = default)
+    {
+        Ensure(await AbilityAsync(cancellationToken), "merge", "Account");
+        return await merges.ListAsync(accountId, take, cancellationToken);
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<AccountMergeDto> Get(Guid id, CancellationToken cancellationToken)
+    {
+        Ensure(await AbilityAsync(cancellationToken), "merge", "Account");
+        return await merges.GetAsync(id, cancellationToken);
+    }
+
+    /// <summary>Asks the plugins that haven't finished the merge (they failed, or were off) to move their rows now.</summary>
+    [HttpPost("{id:guid}/resume")]
+    public async Task<AccountMergeDto> Resume(Guid id, CancellationToken cancellationToken)
+    {
+        Ensure(await AbilityAsync(cancellationToken), "merge", "Account");
+        return await merges.ResumeAsync(id, cancellationToken);
+    }
+}
+
+/// <summary>
+/// A person's own addresses (ADR 0044): added with a link mailed to the address, removed, and the one mail goes to.
+/// Confirming takes only the link, signed in or not.
+/// </summary>
+[Route("api/guard")]
+public class MyEmailsController(AccountEmailService emails, SelfServiceLimiter limiter) : GuardControllerBase
+{
+    [HttpGet("me/emails")]
+    [Authorize]
+    public Task<AccountEmailsDto> List(CancellationToken cancellationToken) => emails.ListAsync(CurrentAccountId, cancellationToken);
+
+    /// <summary>Adds an address and mails a link to it; it counts once the link is followed.</summary>
+    [HttpPost("me/emails")]
+    [Authorize]
+    public Task<AccountEmailsDto> Add([FromBody] AddEmailInput input, CancellationToken cancellationToken)
+    {
+        Limit("email-add", input.Email);
+        return emails.AddForSelfAsync(CurrentAccountId, input.Email, cancellationToken);
+    }
+
+    [HttpDelete("me/emails/{emailId:guid}")]
+    [Authorize]
+    public Task<AccountEmailsDto> Remove(Guid emailId, CancellationToken cancellationToken) => emails.RemoveAsync(CurrentAccountId, emailId, cancellationToken);
+
+    [HttpPut("me/mail-to")]
+    [Authorize]
+    public Task<AccountEmailsDto> MailTo([FromBody] MailToInput input, CancellationToken cancellationToken) =>
+        emails.SetMailToAsync(CurrentAccountId, input.Email, cancellationToken);
+
+    /// <summary>Confirms an address from the link mailed to it.</summary>
+    [AllowAnonymous]
+    [HttpPost("emails/verify")]
+    public async Task<object> Verify([FromBody] TokenInput input, CancellationToken cancellationToken)
+    {
+        Limit("email-verify", null);
+        (string email, string username) = await emails.VerifyAsync(input.Token, cancellationToken);
+        return new { email, username };
+    }
+
+    private void Limit(string action, string? email)
+    {
+        if (!limiter.Allow(action, HttpContext.Connection.RemoteIpAddress?.ToString(), email))
+        {
+            throw new UserFriendlyException("Too many tries. Wait a while and try again.", Toda.Platform.TodaErrorCodes.TooManyRequests);
+        }
     }
 }

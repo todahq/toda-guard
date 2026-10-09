@@ -29,15 +29,23 @@ public class AccountLookup(GuardDb guardDb) : IAccountLookup, ITransientDependen
     public Task<AccountInfo?> FindByUsernameAsync(string username, CancellationToken cancellationToken = default)
     {
         string normalized = GuardConstants.Normalize(username);
-        return guardDb.RunAsync(async db => (await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.NormalizedUsername == normalized, cancellationToken)) is { } a ? ToInfo(a) : null,
-            cancellationToken: cancellationToken);
+        return guardDb.RunAsync(async db =>
+        {
+            Account? account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.NormalizedUsername == normalized, cancellationToken);
+            if (account?.MergedIntoId is { } survivor)
+            {
+                account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == survivor, cancellationToken); // ADR 0044
+            }
+
+            return account is null ? null : ToInfo(account);
+        }, cancellationToken: cancellationToken);
     }
 
     public Task<IReadOnlyList<AccountInfo>> FindByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
         string normalized = GuardConstants.Normalize(email);
-        return guardDb.RunAsync<IReadOnlyList<AccountInfo>>(async db => (await db.Accounts.AsNoTracking()
-                .Where(a => a.Status == AccountStatus.Active && a.Email != null && a.Email.ToLower() == normalized).OrderBy(a => a.Username).Take(10).ToListAsync(cancellationToken))
+        return guardDb.RunAsync<IReadOnlyList<AccountInfo>>(async db => (await Addresses.ActiveWithAddress(db, normalized).AsNoTracking()
+                .OrderBy(a => a.Username).Take(10).ToListAsync(cancellationToken))
             .Select(ToInfo).ToList(), cancellationToken: cancellationToken);
     }
 
@@ -53,8 +61,8 @@ public class AccountLookup(GuardDb guardDb) : IAccountLookup, ITransientDependen
             .ToList(), cancellationToken: cancellationToken);
     }
 
-    internal static AccountInfo ToInfo(Account a) => new(a.Id, a.Username, a.DisplayName, a.Email, a.Status == AccountStatus.Active, a.DirectoryId, a.Language,
-        a.TimeZone);
+    internal static AccountInfo ToInfo(Account a) => new(a.Id, a.Username, a.DisplayName, a.MailAddress, a.Status == AccountStatus.Active, a.DirectoryId, a.Language,
+        a.TimeZone, a.MergedIntoId);
 }
 
 [ExposeServices(typeof(IGroupLookup))]

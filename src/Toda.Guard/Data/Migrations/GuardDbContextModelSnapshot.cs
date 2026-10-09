@@ -56,6 +56,13 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<bool>("LockedLocally")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("MailTo")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<Guid?>("MergedIntoId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("NormalizedUsername")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -80,10 +87,123 @@ namespace Toda.Guard.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("MergedIntoId");
+
                     b.HasIndex("NormalizedUsername")
                         .IsUnique();
 
                     b.ToTable("accounts", "guard");
+                });
+
+            modelBuilder.Entity("Toda.Guard.Domain.AccountEmail", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AddedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId", "NormalizedEmail")
+                        .IsUnique();
+
+                    b.HasIndex(new[] { "NormalizedEmail" }, "IX_account_emails_verified")
+                        .IsUnique()
+                        .HasFilter("\"VerifiedAt\" IS NOT NULL");
+
+                    b.ToTable("account_emails", "guard");
+                });
+
+            modelBuilder.Entity("Toda.Guard.Domain.AccountMergeRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("SourceDirectoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceDisplayName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("SourceEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceUsername")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Steps")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid>("SurvivorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SurvivorUsername")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceId");
+
+                    b.HasIndex("StartedAt");
+
+                    b.HasIndex("SurvivorId");
+
+                    b.ToTable("account_merges", "guard");
                 });
 
             modelBuilder.Entity("Toda.Guard.Domain.DirectoryUser", b =>

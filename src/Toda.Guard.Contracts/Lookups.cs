@@ -3,9 +3,12 @@ namespace Toda.Guard;
 // Integration services other modules and plugins call. Every reference to a person or group is a GUID:
 // group names are display-only, because two directories may each have a group called "admins".
 
-/// <summary>An account as other modules see it; Language and TimeZone are the person's preferences (null: the site's).</summary>
+/// <summary>
+/// An account as other modules see it. Email is where mail goes (ADR 0044); Language and TimeZone are the person's
+/// preferences (null: the site's); MergedIntoId is the account it was merged into, if it was.
+/// </summary>
 public sealed record AccountInfo(Guid Id, string Username, string DisplayName, string? Email, bool IsActive, Guid DirectoryId, string? Language = null,
-    string? TimeZone = null);
+    string? TimeZone = null, Guid? MergedIntoId = null);
 
 /// <summary>A group as other modules see it; Kind is standard, directory, ou or organization (ADR 0037).</summary>
 public sealed record GroupInfo(Guid Id, string Name, string? Description, Guid DirectoryId, string Kind = "standard");
@@ -16,9 +19,14 @@ public interface IAccountLookup
 
     /// <summary>The accounts that exist among these ids; missing ids are left out.</summary>
     Task<IReadOnlyDictionary<Guid, AccountInfo>> GetManyAsync(IEnumerable<Guid> accountIds, CancellationToken cancellationToken = default);
+
+    /// <summary>The account with this username; for an account that was merged, the one it was merged into.</summary>
     Task<AccountInfo?> FindByUsernameAsync(string username, CancellationToken cancellationToken = default);
 
-    /// <summary>The active accounts with this email (any letter case); usually one.</summary>
+    /// <summary>
+    /// The active accounts with this address (any letter case): their directory's, or one they verified (ADR 0044);
+    /// usually one.
+    /// </summary>
     Task<IReadOnlyList<AccountInfo>> FindByEmailAsync(string email, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AccountInfo>> SearchAsync(string text, int max = 20, CancellationToken cancellationToken = default);
 }

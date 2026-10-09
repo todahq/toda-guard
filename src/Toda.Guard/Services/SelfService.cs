@@ -98,7 +98,7 @@ public static class SelfServiceMail
 /// changes. Answers never say whether an email has an account, except sign-up, which has to.
 /// </summary>
 public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IChannels channels, IConfiguration configuration,
-    IEventPublisher events) : ITransientDependency
+    IEventPublisher events, AccountMergeService merges) : ITransientDependency
 {
     public static readonly TimeSpan VerifyFor = TimeSpan.FromHours(72);
     public static readonly TimeSpan ResetFor = TimeSpan.FromHours(1);
@@ -184,13 +184,16 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
                 throw new UserFriendlyException($"Sign-ups here are for {string.Join(", ", s.EmailDomains.Select(d => "@" + d))} addresses.");
             }
 
-            // Taken: by someone else, or by this email confirmed already. A sign-up still waiting may sign up again.
+            // Taken: by someone else, or by this email confirmed already. A sign-up still waiting may sign up again. A
+            // placeholder from an import takes nothing: its person signs up, and it's merged into them (ADR 0044).
             DirectoryUser? pending = await db.DirectoryUsers.FirstOrDefaultAsync(u => u.DirectoryId == directory.Id && u.NormalizedUsername == normalized, ct);
             Guid? waiting = pending?.PendingSince is not null ? pending.Id : null;
+            IQueryable<Account> others = Addresses.NotPlaceholders(db, db.Accounts.Where(a => waiting == null || a.DirectoryUserId != waiting));
             bool taken = (pending is not null && waiting is null)
-                || await db.Accounts.AnyAsync(a => (a.NormalizedUsername == normalized || (a.Email != null && a.Email.ToLower() == normalized))
-                    && (waiting == null || a.DirectoryUserId != waiting), ct)
-                || await db.DirectoryUsers.AnyAsync(u => u.DirectoryId != directory.Id && u.NormalizedUsername == normalized, ct);
+                || await others.AnyAsync(a => a.NormalizedUsername == normalized, ct)
+                || await Addresses.NotPlaceholders(db, Addresses.WithAddress(db, normalized)).AnyAsync(a => waiting == null || a.DirectoryUserId != waiting, ct)
+                || await db.DirectoryUsers.AnyAsync(u => u.DirectoryId != directory.Id && u.NormalizedUsername == normalized
+                    && !db.Directories.Any(d => d.Id == u.DirectoryId && d.Type == AccountProvisioning.ImportedType), ct);
             if (taken)
             {
                 throw new UserFriendlyException("This email already has an account. Sign in, or reset its password.");
@@ -216,7 +219,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
     public async Task<(string Username, List<object> Events)> VerifyAsync(string token, CancellationToken ct)
     {
         Guid id = Unprotect(Verifier, token, "This link doesn't work: it's wrong, or more than three days old. Sign up again for a new one.");
-        return await guardDb.RunAsync(async db =>
+        (string Username, List<object> Events) verified = await guardDb.RunAsync(async db =>
         {
             DirectoryUser user = await db.DirectoryUsers.FirstOrDefaultAsync(u => u.Id == id, ct)
                 ?? throw new UserFriendlyException("This link is for an account that's gone. Sign up again.");
@@ -233,6 +236,8 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
             await Organizations.ApplyDomainsAsync(db, ct);
             return (user.Username, events);
         }, requiresNew: true, ct, isTransactional: true);
+        await merges.FoldPlaceholdersAsync(MergeReasons.SignUp, ct); // a placeholder with this address joins them (ADR 0044)
+        return verified;
     }
 
     /// <summary>
@@ -246,7 +251,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         string? domain = Organizations.DomainOf(email);
         (Guid? id, List<object> created) = await guardDb.RunAsync(async db =>
         {
-            List<Account> owners = await db.Accounts.Where(a => a.Status == AccountStatus.Active && a.Email != null && a.Email.ToLower() == normalized).ToListAsync(ct);
+            List<Account> owners = await Addresses.ActiveWithAddress(db, normalized).ToListAsync(ct);
             if (owners.Count > 0)
             {
                 return (owners.Count == 1 ? owners[0].Id : (Guid?)null, new List<object>());
@@ -257,7 +262,9 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
                 ? await db.Directories.FirstOrDefaultAsync(d => d.Id == directoryId && d.IsActive && d.AuthenticationEnabled, ct)
                 : null;
             if (directory is null || domain is null || (s.EmailDomains.Count > 0 && !s.EmailDomains.Contains(domain))
-                || await db.Accounts.AnyAsync(a => a.NormalizedUsername == normalized, ct) || await db.DirectoryUsers.AnyAsync(u => u.NormalizedUsername == normalized, ct))
+                || await Addresses.NotPlaceholders(db, db.Accounts).AnyAsync(a => a.NormalizedUsername == normalized, ct)
+                || await db.DirectoryUsers.AnyAsync(u => u.NormalizedUsername == normalized
+                    && !db.Directories.Any(d => d.Id == u.DirectoryId && d.Type == AccountProvisioning.ImportedType), ct))
             {
                 return ((Guid?)null, new List<object>());
             }
@@ -279,6 +286,11 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
             await Controllers.GuardEvents.PublishAsync(events, e, ct);
         }
 
+        if (created.Count > 0)
+        {
+            await merges.FoldPlaceholdersAsync(MergeReasons.ConfirmedAddress, ct);
+        }
+
         return id;
     }
 
@@ -294,10 +306,9 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         List<DirectoryUser> users = await guardDb.RunAsync(async db =>
         {
             List<Guid> internalDirectories = await db.Directories.Where(d => d.Type == GuardConstants.InternalType && d.IsActive).Select(d => d.Id).ToListAsync(ct);
-            List<Guid> owners = await db.Accounts.Where(a => a.Status == AccountStatus.Active && a.DirectoryUserId != null).Select(a => a.DirectoryUserId!.Value).ToListAsync(ct);
+            List<Guid> owners = await Addresses.ActiveWithAddress(db, normalized).Where(a => a.DirectoryUserId != null).Select(a => a.DirectoryUserId!.Value).ToListAsync(ct);
             return await db.DirectoryUsers.AsNoTracking()
-                .Where(u => internalDirectories.Contains(u.DirectoryId) && u.IsActive && u.PendingSince == null && u.Email != null && u.Email.ToLower() == normalized
-                    && owners.Contains(u.Id))
+                .Where(u => internalDirectories.Contains(u.DirectoryId) && u.IsActive && u.PendingSince == null && owners.Contains(u.Id))
                 .ToListAsync(ct);
         }, cancellationToken: ct);
 
@@ -305,7 +316,8 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         {
             string token = Resetter.Protect($"{user.Id:N}:{Stamp(user)}", ResetFor);
             await SendAsync(SelfServiceMail.Reset, user,
-                new Dictionary<string, object?> { ["username"] = user.Username, ["link"] = $"{Site}/reset-password#token={token}", ["minutes"] = (int)ResetFor.TotalMinutes }, ct);
+                new Dictionary<string, object?> { ["username"] = user.Username, ["link"] = $"{Site}/reset-password#token={token}", ["minutes"] = (int)ResetFor.TotalMinutes }, ct,
+                to: email.Trim()); // the address asked for: the directory's or one the account verified (ADR 0044)
         }
     }
 
@@ -338,8 +350,8 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         }, requiresNew: true, ct);
     }
 
-    private async Task SendAsync(string template, DirectoryUser user, Dictionary<string, object?> model, CancellationToken ct) =>
-        await channels.SendAsync(new ChannelMessage(template, [ChannelRecipient.Address(user.Email!, user.DisplayName)], model,
+    private async Task SendAsync(string template, DirectoryUser user, Dictionary<string, object?> model, CancellationToken ct, string? to = null) =>
+        await channels.SendAsync(new ChannelMessage(template, [ChannelRecipient.Address(to ?? user.Email!, user.DisplayName)], model,
             Language: LanguageChain.Current.Language, Source: template == SelfServiceMail.Verify ? "signup" : "password-reset"), ct);
 
     private static void Password(string? password)

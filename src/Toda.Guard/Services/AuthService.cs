@@ -53,7 +53,8 @@ public class LoginRateLimiter : ISingletonDependency
 }
 
 /// <summary>Credential check only. Tokens are issued by the OpenIddict token endpoint (ADR 0007).</summary>
-public sealed record LoginResult(bool Succeeded, Account? Account, string? ErrorCode);
+/// <summary>MergedInto: the username to sign in with instead, when the account was merged (ADR 0044) and the password was right.</summary>
+public sealed record LoginResult(bool Succeeded, Account? Account, string? ErrorCode, string? MergedInto = null);
 
 public class AuthService(
     GuardDb guardDb,
@@ -79,6 +80,12 @@ public class AuthService(
             if (account is null)
             {
                 return (false, null, "user_not_found");
+            }
+
+            if (account.MergedIntoId is { } survivorId)
+            {
+                // Merged (ADR 0044). Only someone who knows its password learns which account it became.
+                return (false, account, await MergedAsync(db, account, survivorId, password, cancellationToken));
             }
 
             if (account.Status != AccountStatus.Active)
@@ -120,12 +127,29 @@ public class AuthService(
             }
 
             await AuditAsync("auth.login.failed", normalized, account?.Id, reason, ip, cancellationToken);
-            return new LoginResult(false, null, "invalid_credentials");
+            return reason.StartsWith("account_merged:", StringComparison.Ordinal)
+                ? new LoginResult(false, null, "account_merged", reason["account_merged:".Length..])
+                : new LoginResult(false, null, "invalid_credentials");
         }
 
         limiter.Reset(normalized);
         await AuditAsync("auth.login.succeeded", normalized, account!.Id, null, ip, cancellationToken);
         return new LoginResult(true, account, null);
+    }
+
+    /// <summary>"account_merged:{survivor}" when the password is the merged account's own; otherwise "account_inactive".</summary>
+    private async Task<string> MergedAsync(GuardDbContext db, Account account, Guid survivorId, string password, CancellationToken cancellationToken)
+    {
+        UserDirectory? directory = await db.Directories.FirstOrDefaultAsync(d => d.Id == account.DirectoryId, cancellationToken);
+        DirectoryUser? record = await db.DirectoryUsers.FirstOrDefaultAsync(u => u.DirectoryId == account.DirectoryId && u.NormalizedUsername == account.NormalizedUsername,
+            cancellationToken);
+        if (directory is not { IsActive: true, AuthenticationEnabled: true } || record is null || !(await AuthenticateAsync(directory, record, password)).Succeeded)
+        {
+            return "account_inactive";
+        }
+
+        string? survivor = await db.Accounts.Where(a => a.Id == survivorId).Select(a => a.Username).FirstOrDefaultAsync(cancellationToken);
+        return survivor is null ? "account_inactive" : $"account_merged:{survivor}";
     }
 
     public async Task<(bool Succeeded, string? Error)> AuthenticateAsync(UserDirectory directory, DirectoryUser record, string password)

@@ -38,9 +38,12 @@ public class TokenController(AuthService auth, GuardDb guardDb) : AbpControllerB
             LoginResult result = await auth.LoginAsync(request.Username ?? string.Empty, request.Password ?? string.Empty, ip, cancellationToken);
             if (!result.Succeeded)
             {
-                return Refuse(result.ErrorCode == "too_many_attempts"
-                    ? "Too many failed attempts. Try again in 15 minutes."
-                    : "The username or password is incorrect.");
+                return Refuse(result.ErrorCode switch
+                {
+                    "too_many_attempts" => "Too many failed attempts. Try again in 15 minutes.",
+                    "account_merged" => $"This account was merged into {result.MergedInto}. Sign in as {result.MergedInto}.",
+                    _ => "The username or password is incorrect.",
+                });
             }
 
             return SignIn(CreatePrincipal(result.Account!, request.GetScopes()), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);

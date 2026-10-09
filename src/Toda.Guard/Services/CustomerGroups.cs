@@ -74,7 +74,12 @@ public static class Organizations
     {
         List<Group> organizations = await db.Groups.AsNoTracking().Where(g => g.Kind == GroupKinds.Organization).ToListAsync(ct);
         List<Guid> ids = organizations.Select(o => o.Id).ToList();
-        var accounts = await db.Accounts.AsNoTracking().Where(a => a.Status == AccountStatus.Active && a.Email != null).Select(a => new { a.Id, a.Email }).ToListAsync(ct);
+        // Every address an active account has: its directory's and the ones it verified (ADR 0044).
+        var accounts = (await db.Accounts.AsNoTracking().Where(a => a.Status == AccountStatus.Active && a.Email != null).Select(a => new { a.Id, a.Email }).ToListAsync(ct))
+            .Concat(await db.AccountEmails.AsNoTracking()
+                .Where(e => e.VerifiedAt != null && db.Accounts.Any(a => a.Id == e.AccountId && a.Status == AccountStatus.Active))
+                .Select(e => new { Id = e.AccountId, Email = (string?)e.Email }).ToListAsync(ct))
+            .ToList();
         HashSet<(Guid Group, Guid Account)> wanted = [];
         foreach (Group organization in organizations.Where(o => o.EmailDomains.Count > 0))
         {
