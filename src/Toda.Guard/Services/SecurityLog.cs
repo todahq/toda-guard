@@ -58,8 +58,8 @@ public static class SecurityAuditTypes
 /// is added to the same save as the change (<see cref="Add"/>); the rest commit on their own, whatever happens to the
 /// work around them.
 /// </summary>
-[ExposeServices(typeof(SecurityLog), typeof(ISecurityAudit))]
-public class SecurityLog(GuardDb guardDb, ActingContext acting) : ITransientDependency, ISecurityAudit
+[ExposeServices(typeof(SecurityLog), typeof(ISecurityAudit), typeof(IExportAudit))]
+public class SecurityLog(GuardDb guardDb, ActingContext acting) : ITransientDependency, ISecurityAudit, IExportAudit
 {
     /// <summary>A query's results downloaded as a file (ADR 0043).</summary>
     public const string QueryExport = SecurityAuditTypes.QueryExport;
@@ -105,6 +105,10 @@ public class SecurityLog(GuardDb guardDb, ActingContext acting) : ITransientDepe
     /// </summary>
     public Task ExportedAsync(AccountInfo? person, Guid accountId, string? ip, string entity, string? projectKey, string rql, IReadOnlyList<string>? columns, string format,
         Toda.Platform.Query.QueryExportHead head, CancellationToken cancellationToken = default) =>
+        ExportedAsync(person, accountId, ip, entity, projectKey, rql, columns, format, head.Rows, head.Total, head.Truncated ? head.Limit : null, cancellationToken);
+
+    public Task ExportedAsync(AccountInfo? person, Guid accountId, string? ip, string entity, string? projectKey, string rql, IReadOnlyList<string>? columns,
+        string format, int rows, int total, int? limit, CancellationToken cancellationToken = default) =>
         WriteAsync(QueryExport, person?.Username, accountId, JsonSerializer.Serialize(new
         {
             entity,
@@ -112,8 +116,8 @@ public class SecurityLog(GuardDb guardDb, ActingContext acting) : ITransientDepe
             rql,
             columns,
             format,
-            rows = head.Rows,
-            total = head.Total,
-            limit = head.Truncated ? head.Limit : (int?)null,
+            rows,
+            total,
+            limit,
         }), ip, cancellationToken);
 }

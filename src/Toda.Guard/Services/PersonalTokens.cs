@@ -272,35 +272,9 @@ public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOpt
 public sealed class TokenAccessLimit : IAbilityLimit, ITransientDependency
 {
     /// <summary>The actions that only read.</summary>
-    public static readonly IReadOnlyList<string> ReadActions = ["read", "browse", "portal"];
+    public static readonly IReadOnlyList<string> ReadActions = AbilityRules.ReadActions;
 
     public Ability Apply(Ability ability, ActingContext acting) =>
         acting.ReadOnly ? AbilityRules.Rebuild(ability, rule => rule.Inverted ? [rule] : [AbilityRules.WithActions(rule, ReadActions)]) : ability;
 }
 
-/// <summary>Rebuilding an ability from its own rules, narrowed: what the request limits (ADR 0042) are made of.</summary>
-public static class AbilityRules
-{
-    /// <summary>Each rule of the ability, as <paramref name="rewrite"/> turns it into rules (none drops it), plus <paramref name="extra"/>.</summary>
-    public static Ability Rebuild(Ability ability, Func<RawRule, IEnumerable<RawRule?>> rewrite, IEnumerable<RawRule>? extra = null) =>
-        new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options)
-            .AddRange(ability.Rules.SelectMany(rewrite).OfType<RawRule>().Concat(extra ?? []), null)
-            .Build();
-
-    /// <summary>The rule with only these of its actions ("manage" counting as all of them); null when none is left.</summary>
-    public static RawRule? WithActions(RawRule rule, IReadOnlyList<string> allowed)
-    {
-        List<string> actions = rule.Action.Contains("manage") ? [.. allowed] : rule.Action.Where(allowed.Contains).ToList();
-        return actions.Count == 0 ? null : Copy(rule, actions, rule.Subject);
-    }
-
-    public static RawRule Copy(RawRule rule, IReadOnlyList<string> actions, IReadOnlyList<string> subjects) => new()
-    {
-        Action = actions,
-        Subject = subjects,
-        Conditions = rule.Conditions?.DeepClone().AsObject(),
-        Fields = rule.Fields,
-        Inverted = rule.Inverted,
-        Reason = rule.Reason,
-    };
-}

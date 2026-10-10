@@ -63,8 +63,7 @@ public static class Organizations
             && domain.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-') ? domain : null;
     }
 
-    public static string? DomainOf(string? email) =>
-        email is not null && email.LastIndexOf('@') is > 0 and int at && at < email.Length - 1 ? email[(at + 1)..].Trim().ToLowerInvariant() : null;
+    public static string? DomainOf(string? email) => EmailDomains.Of(email);
 
     /// <summary>
     /// Puts every active account whose email is in an organization's domains in it, and takes out those no longer

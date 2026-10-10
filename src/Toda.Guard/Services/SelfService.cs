@@ -97,8 +97,9 @@ public static class SelfServiceMail
 /// directories). Links carry a token from Data Protection that expires, and a reset token is spent once the password
 /// changes. Answers never say whether an email has an account, except sign-up, which has to.
 /// </summary>
+[ExposeServices(typeof(SelfService), typeof(ICustomerAccounts))]
 public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IChannels channels, IConfiguration configuration,
-    IEventPublisher events, AccountMergeService merges, SecurityLog audit) : ITransientDependency
+    IEventPublisher events, AccountMergeService merges, SecurityLog audit) : ITransientDependency, ICustomerAccounts
 {
     public static readonly TimeSpan VerifyFor = TimeSpan.FromHours(72);
     public static readonly TimeSpan ResetFor = TimeSpan.FromHours(1);

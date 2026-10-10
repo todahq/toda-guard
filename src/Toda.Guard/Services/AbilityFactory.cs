@@ -8,10 +8,13 @@ using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
 
-/// <summary>Subjects guard exposes to rules, and the member paths rules may filter on.</summary>
+/// <summary>
+/// Subjects guard exposes to rules, and the member paths rules may filter on: guard's own, added to the registry every
+/// module shares (<see cref="AbilitySubjects"/>) before guard first reads it.
+/// </summary>
 public static class GuardSubjects
 {
-    public static SubjectRegistry Registry { get; } = new SubjectRegistry()
+    static GuardSubjects() => AbilitySubjects.Registry
         .Add<Account>("Account", s => s
             .ConditionFields("id", "directoryId", "status", "username", "lockedLocally")
             .Fields("displayName", "email", "status"))
@@ -20,11 +23,10 @@ public static class GuardSubjects
         .Add<RoleSubject>("Role")
         .Add<PluginSubject>("Plugin");
 
-    /// <summary>
-    /// Rules come from several roles and grants, so their order means nothing: any matching deny wins.
-    /// (CASL .NET's default is CASL's "last rule wins".)
-    /// </summary>
-    public static AbilityOptions Options { get; } = new() { Semantics = RuleSemantics.DenyOverrides };
+    public static SubjectRegistry Registry => AbilitySubjects.Registry;
+
+    /// <summary>Any matching deny wins (<see cref="AbilitySubjects.Options"/>).</summary>
+    public static AbilityOptions Options => AbilitySubjects.Options;
 
     /// <summary>Marker types for subjects that only get type-level checks for now.</summary>
     public sealed class RoleSubject;
@@ -33,23 +35,15 @@ public static class GuardSubjects
 }
 
 /// <summary>
-/// Narrows the request's own ability (ADR 0042): a token's scopes, an impersonation's fixed denies. Applied by
-/// <see cref="AbilityFactory"/> to the request's subject only, so no path to that person's ability skips it.
-/// </summary>
-public interface IAbilityLimit
-{
-    Ability Apply(Ability ability, ActingContext acting);
-}
-
-/// <summary>
 /// Builds an account's <see cref="Ability"/> from the roles granted to it directly or to any of its effective
 /// groups (nested groups count). Each grant's scope fills that grant's ${grant.*} placeholders.
 /// Kept between requests while the permission stamp stays the same (ADR 0041), and within a request once read.
 /// The one way to an ability (ADR 0042): when the account is the request's subject, the request's limits apply.
 /// </summary>
+[ExposeServices(typeof(AbilityFactory), typeof(IAbilities))]
 public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<AbilityFactory> logger, IEnumerable<IGrantScopeExpander> expanders, AbilityCache kept,
     ActingContext acting, IEnumerable<IAbilityLimit> limits)
-    : IScopedDependency
+    : IScopedDependency, IAbilities
 {
     private readonly Dictionary<Guid, Ability> _cache = [];
 

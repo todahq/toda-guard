@@ -2,19 +2,6 @@ using Volo.Abp.Domain.Entities;
 
 namespace Toda.Guard.Domain;
 
-public static class GuardConstants
-{
-    public const string InternalType = "internal";
-    public static readonly Guid InternalDirectoryId = Guid.Parse("00000000-0000-0000-0000-00000000d001");
-    public static readonly Guid AdminsGroupId = Guid.Parse("00000000-0000-0000-0000-00000000a001");
-    public static readonly Guid UsersGroupId = Guid.Parse("00000000-0000-0000-0000-00000000a002");
-
-    /// <summary>The Anonymous principal (ADR 0037): whoever isn't signed in. Granted nothing unless an admin grants it.</summary>
-    public static readonly Guid AnonymousId = Guid.Parse("00000000-0000-0000-0000-00000000b001");
-
-    public static string Normalize(string value) => value.Trim().ToLowerInvariant();
-}
-
 /// <summary>A source of users and groups. Lower Order wins when two directories know the same username.</summary>
 public class UserDirectory : Entity<Guid>
 {

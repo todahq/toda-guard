@@ -11,21 +11,15 @@ using Volo.Abp.Domain.Entities;
 
 namespace Toda.Guard.Services;
 
-/// <summary>A role other modules define in code, such as a project role contributed by a feature.</summary>
-public sealed record RoleDefinition(string Key, string Name, string? Description, IReadOnlyList<JsonObject> Rules);
-
-public sealed record GrantInfo(
-    Guid Id, Guid RoleId, string RoleKey, string RoleName, PrincipalType PrincipalType, Guid PrincipalId, string PrincipalName,
-    JsonObject Scope, string? ScopeKey, DateTime? ValidUntil, DateTime CreatedAt);
-
 /// <summary>
-/// Roles and grants for other modules (ADR 0010). Projects keep their roles here instead of in a second permission
-/// system: a project role is a system role whose rules use ${grant.projectId}, and a member is a grant with
-/// scope {"projectId": …} and scope key "project:{id}".
+/// Roles and grants for other modules (ADR 0010), behind <see cref="IRoleCatalog"/> (ADR 0047 step 5). Projects keep
+/// their roles here instead of in a second permission system: a project role is a system role whose rules use
+/// ${grant.projectId}, and a member is a grant with scope {"projectId": …} and scope key "project:{id}".
 /// </summary>
-public class RoleCatalog(GuardDb guardDb, MembershipGraph graph, SecurityLog audit) : ITransientDependency
+[ExposeServices(typeof(RoleCatalog), typeof(IRoleCatalog))]
+public class RoleCatalog(GuardDb guardDb, MembershipGraph graph, SecurityLog audit) : ITransientDependency, IRoleCatalog
 {
-    public static readonly System.Text.RegularExpressions.Regex KeyPattern = new("^[a-z][a-z0-9-]{1,63}$");
+    public static readonly System.Text.RegularExpressions.Regex KeyPattern = RoleKeys.Pattern;
 
     /// <summary>Problems with one rule in CASL's raw format: subjects, fields, condition paths, operators.</summary>
     public static IReadOnlyList<string> Problems(JsonObject rule)
@@ -269,4 +263,11 @@ public class RoleCatalog(GuardDb guardDb, MembershipGraph graph, SecurityLog aud
         }, cancellationToken: cancellationToken);
 
     private static string Normalize(string json) => JsonNode.Parse(json)?.ToJsonString() ?? json;
+}
+
+/// <summary>Checks roles' rules against guard's subjects, for other modules (<see cref="IRoleRules"/>).</summary>
+[ExposeServices(typeof(IRoleRules))]
+public sealed class RoleRules : IRoleRules, ISingletonDependency
+{
+    public IReadOnlyList<string> Problems(JsonObject rule) => RoleCatalog.Problems(rule);
 }

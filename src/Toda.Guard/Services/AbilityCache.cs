@@ -10,7 +10,8 @@ namespace Toda.Guard.Services;
 /// until" runs out. When requests start reading another stamp, the kept abilities are dropped. CASL .NET's abilities are
 /// immutable, so concurrent requests share them, with the checks they've compiled.
 /// </summary>
-public sealed class AbilityCache : ISingletonDependency
+[ExposeServices(typeof(AbilityCache), typeof(IPermissionStamp))]
+public sealed class AbilityCache : ISingletonDependency, IPermissionStamp
 {
     /// <summary>How many abilities are kept at most; past that, all are dropped and built again as needed.</summary>
     public const int MaxEntries = 10_000;

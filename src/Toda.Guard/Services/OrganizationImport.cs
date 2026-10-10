@@ -12,7 +12,8 @@ namespace Toda.Guard.Services;
 /// directory's organization with that name, else a new one. The source's members are added by hand, as an admin would
 /// add them, so later syncs and domain rules leave them be; members it has already stay.
 /// </summary>
-public class OrganizationImport(GuardDb guardDb, IEventPublisher events) : ITransientDependency
+[ExposeServices(typeof(OrganizationImport), typeof(IOrganizationImport))]
+public class OrganizationImport(GuardDb guardDb, IEventPublisher events) : ITransientDependency, IOrganizationImport
 {
     public async Task<Guid> EnsureAsync(Guid? known, string name, IReadOnlyCollection<Guid> members, CancellationToken cancellationToken)
     {
