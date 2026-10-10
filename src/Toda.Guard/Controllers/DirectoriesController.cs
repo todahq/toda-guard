@@ -225,6 +225,7 @@ public class DirectoriesController(
             .ToList(), cancellationToken: cancellationToken);
 
     [HttpPost("directories/{id:guid}/test")]
+    [Reads]
     public async Task<ConnectionTestResult> Test(Guid id, CancellationToken cancellationToken)
     {
         UserDirectory directory = await LoadAsync(id, cancellationToken);

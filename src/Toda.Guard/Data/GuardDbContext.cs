@@ -18,6 +18,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     public DbSet<SyncRun> SyncRuns => Set<SyncRun>();
     public DbSet<SecurityEvent> SecurityEvents => Set<SecurityEvent>();
     public DbSet<SecuritySettings> SecuritySettings => Set<SecuritySettings>();
+    public DbSet<PersonalAccessToken> PersonalAccessTokens => Set<PersonalAccessToken>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<RoleRule> RoleRules => Set<RoleRule>();
     public DbSet<RoleGrant> RoleGrants => Set<RoleGrant>();
@@ -204,6 +205,19 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
         {
             b.ToTable("security_settings");
             b.Property(x => x.StepUpMinutes).HasDefaultValue(Domain.SecuritySettings.DefaultStepUpMinutes);
+            b.Property(x => x.TokenMaxDays).HasDefaultValue(Domain.SecuritySettings.DefaultTokenMaxDays);
+        });
+
+        builder.Entity<PersonalAccessToken>(b =>
+        {
+            b.ToTable("personal_access_tokens");
+            b.Property(x => x.Name).HasMaxLength(100).IsRequired();
+            b.Property(x => x.Prefix).HasMaxLength(32).IsRequired();
+            b.Property(x => x.SecretHash).HasMaxLength(64).IsRequired();
+            b.Property(x => x.Access).HasMaxLength(16).IsRequired();
+            b.Property(x => x.LastUsedIp).HasMaxLength(64);
+            b.HasIndex(x => x.SecretHash).IsUnique();
+            b.HasIndex(x => x.AccountId);
         });
     }
 }

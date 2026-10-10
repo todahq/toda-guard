@@ -54,6 +54,7 @@ public class RolesController(GuardDb guardDb, RoleCatalog roleCatalog, SecurityL
 
     /// <summary>Checks a rule before saving: subjects, fields, condition paths and operators. Placeholders are allowed.</summary>
     [HttpPost("validate-rule")]
+    [Reads]
     public object Validate([FromBody] ValidateInput input)
     {
         try

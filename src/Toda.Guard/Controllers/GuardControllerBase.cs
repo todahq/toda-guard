@@ -88,13 +88,16 @@ public static class GuardEvents
 
 // ---- DTOs (see docs/api.md) ----
 
-/// <summary>An account; MergedIntoId is the account it was merged into (ADR 0044), MailTo the address mail goes to when it isn't Email.</summary>
+/// <summary>
+/// An account; MergedIntoId is the account it was merged into (ADR 0044), MailTo the address mail goes to when it isn't
+/// Email, IsService whether it's a service account rather than a person (M7).
+/// </summary>
 public sealed record AccountDto(
     Guid Id, string Username, string DisplayName, string? Email, string Status, string? StatusReason,
-    Guid DirectoryId, string DirectoryName, DateTime? LastLoginAt, Guid? MergedIntoId = null, string? MailTo = null)
+    Guid DirectoryId, string DirectoryName, DateTime? LastLoginAt, Guid? MergedIntoId = null, string? MailTo = null, bool IsService = false)
 {
     public static AccountDto From(Account a, string directoryName) =>
-        new(a.Id, a.Username, a.DisplayName, a.Email, a.Status.ToString(), a.StatusReason, a.DirectoryId, directoryName, a.LastLoginAt, a.MergedIntoId, a.MailTo);
+        new(a.Id, a.Username, a.DisplayName, a.Email, a.Status.ToString(), a.StatusReason, a.DirectoryId, directoryName, a.LastLoginAt, a.MergedIntoId, a.MailTo, a.IsService);
 }
 
 public sealed record IdentityDto(

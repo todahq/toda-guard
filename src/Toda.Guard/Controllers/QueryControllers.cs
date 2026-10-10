@@ -1,3 +1,4 @@
+using Toda.Platform.Acting;
 using System.Linq.Expressions;
 using Casl;
 using Microsoft.AspNetCore.Authorization;
@@ -22,6 +23,7 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
     SecurityLog securityLog) : GuardControllerBase
 {
     [HttpPost("accounts")]
+    [Reads]
     public async Task<QueryResultDto> Accounts([FromBody] EntityQueryInput input, CancellationToken cancellationToken)
     {
         Ability ability = await AbilityAsync(cancellationToken);
@@ -33,6 +35,7 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
 
     /// <summary>The accounts list as a file (ADR 0043), inside the same rules as the list.</summary>
     [HttpPost("accounts/export")]
+    [Reads]
     [ProducesResponseType(typeof(Stream), StatusCodes.Status200OK, QueryExports.CsvContentType, QueryExports.XlsxContentType)]
     public Task ExportAccounts([FromBody] EntityExportInput input, CancellationToken cancellationToken) =>
         ExportAsync("accounts", input, ability => Ensure(ability, "read", "Account"),
@@ -40,6 +43,7 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
 
     /// <summary>The groups list as a file (ADR 0043).</summary>
     [HttpPost("groups/export")]
+    [Reads]
     [ProducesResponseType(typeof(Stream), StatusCodes.Status200OK, QueryExports.CsvContentType, QueryExports.XlsxContentType)]
     public Task ExportGroups([FromBody] EntityExportInput input, CancellationToken cancellationToken) =>
         ExportAsync("groups", input, null, (db, _) => db.Groups.AsNoTracking(), db => GroupModelAsync(db, cancellationToken), cancellationToken);
@@ -85,6 +89,7 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
     }
 
     [HttpPost("groups")]
+    [Reads]
     public Task<QueryResultDto> Groups([FromBody] EntityQueryInput input, CancellationToken cancellationToken) =>
         guardDb.RunAsync(async db => await EntityQueryEngine.RunAsync(
             db.Groups.AsNoTracking(), await GroupModelAsync(db, cancellationToken), input, Context(), cancellationToken), cancellationToken: cancellationToken);

@@ -66,7 +66,11 @@ public class AuthController(GuardDb guardDb, MembershipGraph graph, Toda.Platfor
             groups = groups.Select(g => new EffectiveGroupDto(g.Group.Id, g.Group.Name, g.Group.DirectoryId, directories.GetValueOrDefault(g.Group.DirectoryId, "?"), g.Direct, g.Path)),
             isAdmin = ability.Can("manage", "all"),
             // Whose rights the session uses and who is acting (ADR 0042): only a subject unless someone acts for them.
-            acting = new { accountId = Acting.SubjectId, actingAccountId = Acting.ActorId, mode = Acting.Mode, sessionId = Acting.SessionId },
+            acting = new
+            {
+                accountId = Acting.SubjectId, actingAccountId = Acting.ActorId, mode = Acting.Mode, sessionId = Acting.SessionId,
+                tokenId = Acting.TokenId, readOnly = Acting.ReadOnly, projectIds = Acting.TokenProjects,
+            },
             preferences = Preferences(account),
             // CASL raw rules for the browser (casl-net): the UI hides what the server would refuse.
             rules = ability.ToCaslRules(),

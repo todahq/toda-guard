@@ -23,6 +23,9 @@ namespace Toda.Guard;
 [DependsOn(typeof(TodaPlatformModule))]
 public class TodaGuardModule : AbpModule
 {
+    /// <summary>The default authentication scheme: it sends each bearer token to the handler for its kind.</summary>
+    public const string TodaBearer = "TodaBearer";
+
     public const string Version = "0.1.0";
 
     public override void ConfigureServices(ServiceConfigurationContext context)
@@ -76,7 +79,11 @@ public class TodaGuardModule : AbpModule
                 options.UseAspNetCore();
             });
 
-        context.Services.AddAuthentication(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+        // A bearer token is either an access token from the token endpoint (OpenIddict) or a personal access token (M7).
+        context.Services.AddAuthentication(TodaBearer)
+            .AddPolicyScheme(TodaBearer, null, options => options.ForwardDefaultSelector = http =>
+                PersonalTokenHandler.Carries(http.Request) ? PersonalTokenHandler.Scheme : OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
+            .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, PersonalTokenHandler>(PersonalTokenHandler.Scheme, null);
 
         context.Services.AddAuthorization(options =>
             options.AddPolicy(TodaPolicies.Admin, policy => policy.RequireAuthenticatedUser().AddRequirements(new TodaAdminRequirement())));

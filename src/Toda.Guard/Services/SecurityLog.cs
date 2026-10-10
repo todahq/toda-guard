@@ -38,6 +38,9 @@ public static class SecurityAuditTypes
     public const string StepUpSucceeded = "auth.step-up.succeeded";
     public const string StepUpFailed = "auth.step-up.failed";
     public const string StepUpEndedSession = "auth.step-up.session-ended";
+    public const string TokenCreated = "token.created";
+    public const string TokenRevoked = "token.revoked";
+    public const string TokenSettingsChanged = "settings.tokens";
 }
 
 /// <summary>

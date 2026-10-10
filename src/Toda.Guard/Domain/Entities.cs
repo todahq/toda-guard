@@ -163,6 +163,12 @@ public class Account : Entity<Guid>
 
     /// <summary>The address mail goes to: the one chosen, else the directory's.</summary>
     public string? MailAddress => MailTo ?? Email;
+
+    /// <summary>
+    /// An account that isn't a person (M7): it has roles like anyone, never signs in, and acts only through the
+    /// personal access tokens an admin makes for it.
+    /// </summary>
+    public bool IsService { get; set; }
 }
 
 /// <summary>
@@ -365,4 +371,71 @@ public class SecuritySettings : Entity<Guid>
     public const int MaxStepUpMinutes = 30;
 
     public int StepUpMinutes { get; set; } = DefaultStepUpMinutes;
+
+    public const int DefaultTokenMaxDays = 90;
+    public const int MinTokenMaxDays = 1;
+    public const int MaxTokenMaxDays = 366;
+
+    /// <summary>The longest a personal access token may live: every token expires, within this.</summary>
+    public int TokenMaxDays { get; set; } = DefaultTokenMaxDays;
+}
+
+/// <summary>Whether a personal access token may change things or only read.</summary>
+public static class TokenAccess
+{
+    public const string Read = "read";
+    public const string Write = "write";
+}
+
+/// <summary>
+/// A personal access token (M7, ADR 0042): a secret an account uses as a bearer token, shown once and kept only as its
+/// hash. It can do no more than the account; it may be limited to reading and to some projects, it always expires,
+/// and it can never do a sensitive action.
+/// </summary>
+public class PersonalAccessToken : Entity<Guid>
+{
+    protected PersonalAccessToken()
+    {
+    }
+
+    public PersonalAccessToken(Guid id, Guid accountId, string name, string prefix, string secretHash, string access, List<Guid>? projectIds, DateTime expiresAt, Guid createdBy)
+        : base(id)
+    {
+        AccountId = accountId;
+        Name = name;
+        Prefix = prefix;
+        SecretHash = secretHash;
+        Access = access;
+        ProjectIds = projectIds;
+        ExpiresAt = expiresAt;
+        CreatedBy = createdBy;
+        CreatedAt = DateTime.UtcNow;
+    }
+
+    public Guid AccountId { get; private set; }
+    public string Name { get; private set; } = null!;
+
+    /// <summary>The token's first characters, to recognise it in a list.</summary>
+    public string Prefix { get; private set; } = null!;
+
+    /// <summary>SHA-256 of the whole token, in hex.</summary>
+    public string SecretHash { get; private set; } = null!;
+
+    public string Access { get; private set; } = null!;
+
+    /// <summary>The projects it's limited to; null for every project the account may use.</summary>
+    public List<Guid>? ProjectIds { get; private set; }
+
+    public DateTime ExpiresAt { get; private set; }
+    public DateTime CreatedAt { get; private set; }
+
+    /// <summary>Who made it: the account itself, or an admin for a service account.</summary>
+    public Guid CreatedBy { get; private set; }
+
+    public DateTime? LastUsedAt { get; set; }
+    public string? LastUsedIp { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public Guid? RevokedBy { get; set; }
+
+    public bool IsActive(DateTime now) => RevokedAt is null && ExpiresAt > now;
 }

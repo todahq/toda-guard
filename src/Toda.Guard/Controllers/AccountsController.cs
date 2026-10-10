@@ -230,6 +230,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
     /// <summary>What merging this account into another would move, without moving anything.</summary>
     [HttpPost("{id:guid}/merge/preview")]
+    [Reads]
     public async Task<MergePreviewDto> PreviewMerge(Guid id, [FromBody] MergeInput input, CancellationToken cancellationToken)
     {
         await EnsureMergeAsync(id, input.SurvivorId, cancellationToken);
@@ -303,6 +304,7 @@ public class MyEmailsController(AccountEmailService emails, SelfServiceLimiter l
 
     /// <summary>Adds an address and mails a link to it; it counts once the link is followed.</summary>
     [HttpPost("me/emails")]
+    [StepUp]
     [Authorize]
     public Task<AccountEmailsDto> Add([FromBody] AddEmailInput input, CancellationToken cancellationToken)
     {
@@ -315,6 +317,7 @@ public class MyEmailsController(AccountEmailService emails, SelfServiceLimiter l
     public Task<AccountEmailsDto> Remove(Guid emailId, CancellationToken cancellationToken) => emails.RemoveAsync(CurrentAccountId, emailId, cancellationToken);
 
     [HttpPut("me/mail-to")]
+    [StepUp]
     [Authorize]
     public Task<AccountEmailsDto> MailTo([FromBody] MailToInput input, CancellationToken cancellationToken) =>
         emails.SetMailToAsync(CurrentAccountId, input.Email, cancellationToken);

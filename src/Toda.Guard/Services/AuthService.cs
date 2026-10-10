@@ -96,6 +96,12 @@ public class AuthService(
                 return (false, account, $"account_{account.Status.ToString().ToLowerInvariant()}");
             }
 
+            // A service account acts only through its tokens.
+            if (account.IsService)
+            {
+                return (false, account, "service_account");
+            }
+
             if (await CheckPasswordAsync(db, account, password, cancellationToken) is { } refused)
             {
                 return (false, account, refused);

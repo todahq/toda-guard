@@ -12,12 +12,15 @@ using Volo.Abp.DependencyInjection;
 namespace Toda.Guard.Controllers;
 
 /// <summary>
-/// The site's security settings (ADR 0042), with their limits: how long the security audit keeps events, and how
-/// recently a person must have signed in or stepped up to do something sensitive.
+/// The site's security settings (ADR 0042), with their limits: how long the security audit keeps events, how
+/// recently a person must have signed in or stepped up to do something sensitive, and the longest a personal access
+/// token may live.
 /// </summary>
-public sealed record SecuritySettingsDto(int RetentionDays, int MinRetentionDays, int MaxRetentionDays, int StepUpMinutes, int MinStepUpMinutes, int MaxStepUpMinutes);
+public sealed record SecuritySettingsDto(int RetentionDays, int MinRetentionDays, int MaxRetentionDays, int StepUpMinutes, int MinStepUpMinutes, int MaxStepUpMinutes,
+    int TokenMaxDays, int MinTokenMaxDays, int MaxTokenMaxDays);
 
-public sealed record SecuritySettingsInput(int RetentionDays, int StepUpMinutes);
+/// <summary>The settings to save; TokenMaxDays left out keeps what's saved.</summary>
+public sealed record SecuritySettingsInput(int RetentionDays, int StepUpMinutes, int? TokenMaxDays = null);
 
 /// <summary>
 /// Security settings, for site admins. Changing them is sensitive (a shorter retention removes older events, a longer
@@ -45,9 +48,21 @@ public class SecuritySettingsController(GuardDb guardDb, SecurityLog audit) : Gu
             throw new UserFriendlyException($"Ask for the password again after {SecuritySettings.MinStepUpMinutes} to {SecuritySettings.MaxStepUpMinutes} minutes.");
         }
 
+        if (input.TokenMaxDays is < SecuritySettings.MinTokenMaxDays or > SecuritySettings.MaxTokenMaxDays)
+        {
+            throw new UserFriendlyException($"Tokens may live at most {SecuritySettings.MinTokenMaxDays} to {SecuritySettings.MaxTokenMaxDays} days.");
+        }
+
         return guardDb.RunAsync(async db =>
         {
             SecuritySettings settings = await LoadAsync(db, cancellationToken);
+            if (input.TokenMaxDays is { } days && settings.TokenMaxDays != days)
+            {
+                // Tokens made before keep their expiry; only new ones are held to it.
+                audit.Add(db, SecurityAuditTypes.TokenSettingsChanged, null, new { tokenMaxDays = new { before = settings.TokenMaxDays, after = days } });
+                settings.TokenMaxDays = days;
+            }
+
             if (settings.RetentionDays != input.RetentionDays)
             {
                 audit.Add(db, SecurityAuditTypes.RetentionChanged, null, new { retentionDays = new { before = settings.RetentionDays, after = input.RetentionDays } });
@@ -81,7 +96,8 @@ public class SecuritySettingsController(GuardDb guardDb, SecurityLog audit) : Gu
 
     private static SecuritySettingsDto ToDto(SecuritySettings s) => new(
         s.RetentionDays, SecuritySettings.MinRetentionDays, SecuritySettings.MaxRetentionDays,
-        s.StepUpMinutes, SecuritySettings.MinStepUpMinutes, SecuritySettings.MaxStepUpMinutes);
+        s.StepUpMinutes, SecuritySettings.MinStepUpMinutes, SecuritySettings.MaxStepUpMinutes,
+        s.TokenMaxDays, SecuritySettings.MinTokenMaxDays, SecuritySettings.MaxTokenMaxDays);
 }
 
 /// <summary>The step-up window as the site sets it (ADR 0042): ten minutes unless changed, never more than thirty.</summary>
