@@ -22,8 +22,11 @@
   <ItemGroup>
     <ProjectReference Include="..\Toda.Platform\Toda.Platform.csproj" />
     <ProjectReference Include="..\Toda.Guard.Contracts\Toda.Guard.Contracts.csproj" />
-    <!-- The open-source authorization library, from its own repository next to this one. -->
-    <ProjectReference Include="..\..\..\casl-net\src\Casl.Net\Casl.Net.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- CASL .NET, the open-source authorization library (github.com/tekthar/casl-net). -->
+    <PackageReference Include="Casl.Net" Version="0.1.0" />
   </ItemGroup>
 
 </Project>
