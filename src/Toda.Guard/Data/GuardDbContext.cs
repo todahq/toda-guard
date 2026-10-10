@@ -200,6 +200,10 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.HasIndex(x => x.TargetId);
         });
 
-        builder.Entity<SecuritySettings>(b => b.ToTable("security_settings"));
+        builder.Entity<SecuritySettings>(b =>
+        {
+            b.ToTable("security_settings");
+            b.Property(x => x.StepUpMinutes).HasDefaultValue(Domain.SecuritySettings.DefaultStepUpMinutes);
+        });
     }
 }

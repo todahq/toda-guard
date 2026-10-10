@@ -338,7 +338,10 @@ public class SecurityEvent : Entity<Guid>
     public string? TargetName { get; init; }
 }
 
-/// <summary>The site's security settings (one row): how long the security audit keeps its events.</summary>
+/// <summary>
+/// The site's security settings (one row): how long the security audit keeps its events, and how recently a person must
+/// have signed in or stepped up to do something sensitive (ADR 0042).
+/// </summary>
 public class SecuritySettings : Entity<Guid>
 {
     public static readonly Guid SingletonId = new("5ec0a0d1-0000-4000-8000-000000000001");
@@ -356,4 +359,10 @@ public class SecuritySettings : Entity<Guid>
     }
 
     public int RetentionDays { get; set; } = DefaultRetentionDays;
+
+    public const int DefaultStepUpMinutes = 10;
+    public const int MinStepUpMinutes = 1;
+    public const int MaxStepUpMinutes = 30;
+
+    public int StepUpMinutes { get; set; } = DefaultStepUpMinutes;
 }

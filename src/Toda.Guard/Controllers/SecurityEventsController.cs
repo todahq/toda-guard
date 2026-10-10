@@ -21,19 +21,14 @@ public sealed record SecurityEventDto(
 
 public sealed record SecurityEventPageDto(long Total, List<SecurityEventDto> Items);
 
-/// <summary>How long the security audit keeps its events, in days.</summary>
-public sealed record SecurityAuditSettingsDto(int RetentionDays, int MinRetentionDays, int MaxRetentionDays);
-
-public sealed record SecurityAuditSettingsInput(int RetentionDays);
-
 /// <summary>
 /// The security audit, for site admins (ADR 0042): sign-ins, exports, and every change to who may do what, newest first,
 /// by kind, by the account it was done by, for or to, and by text. Nothing here edits or deletes an event; the retention
-/// setting decides how long they're kept.
+/// setting (<see cref="SecuritySettingsController"/>) decides how long they're kept.
 /// </summary>
 [Route("api/guard/security-events")]
 [Authorize(Policy = TodaPolicies.Admin)]
-public class SecurityEventsController(GuardDb guardDb, SecurityLog audit, IEnumerable<IGrantScopeDescriber> describers) : GuardControllerBase
+public class SecurityEventsController(GuardDb guardDb, IEnumerable<IGrantScopeDescriber> describers) : GuardControllerBase
 {
     /// <summary>
     /// Events newest first. <c>type</c> is one kind (<c>grant.added</c>) or every kind under a prefix ending in a dot
@@ -129,48 +124,4 @@ public class SecurityEventsController(GuardDb guardDb, SecurityLog audit, IEnume
             return null;
         }
     }
-
-    [HttpGet("settings")]
-    public Task<SecurityAuditSettingsDto> Settings(CancellationToken cancellationToken) =>
-        guardDb.RunAsync(async db => ToDto(await LoadAsync(db, cancellationToken)), cancellationToken: cancellationToken);
-
-    /// <summary>Changing how long events are kept is itself a change the audit records: a shorter time removes older events.</summary>
-    [HttpPut("settings")]
-    public Task<SecurityAuditSettingsDto> SaveSettings([FromBody] SecurityAuditSettingsInput input, CancellationToken cancellationToken)
-    {
-        if (input.RetentionDays is < SecuritySettings.MinRetentionDays or > SecuritySettings.MaxRetentionDays)
-        {
-            throw new UserFriendlyException($"Keep security events between {SecuritySettings.MinRetentionDays} and {SecuritySettings.MaxRetentionDays} days.");
-        }
-
-        return guardDb.RunAsync(async db =>
-        {
-            SecuritySettings settings = await LoadAsync(db, cancellationToken);
-            if (settings.RetentionDays != input.RetentionDays)
-            {
-                audit.Add(db, SecurityAuditTypes.RetentionChanged, null, new { retentionDays = new { before = settings.RetentionDays, after = input.RetentionDays } });
-                settings.RetentionDays = input.RetentionDays;
-                await db.SaveChangesAsync(cancellationToken);
-            }
-
-            return ToDto(settings);
-        }, requiresNew: true, cancellationToken);
-    }
-
-    /// <summary>The site's security settings, made with the defaults the first time they're asked for.</summary>
-    public static async Task<SecuritySettings> LoadAsync(GuardDbContext db, CancellationToken cancellationToken)
-    {
-        SecuritySettings? settings = await db.SecuritySettings.FirstOrDefaultAsync(s => s.Id == SecuritySettings.SingletonId, cancellationToken);
-        if (settings is null)
-        {
-            settings = new SecuritySettings(SecuritySettings.SingletonId);
-            db.SecuritySettings.Add(settings);
-            await db.SaveChangesAsync(cancellationToken);
-        }
-
-        return settings;
-    }
-
-    private static SecurityAuditSettingsDto ToDto(SecuritySettings s) =>
-        new(s.RetentionDays, SecuritySettings.MinRetentionDays, SecuritySettings.MaxRetentionDays);
 }

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
+using Toda.Platform.Acting;
 using Toda.Platform.Controllers;
 using Volo.Abp.Domain.Entities;
 
@@ -39,6 +40,7 @@ public class AnonymousController(RoleCatalog roles, IEnumerable<IGrantScopeDescr
     }
 
     [HttpDelete("{grantId:guid}")]
+    [StepUp]
     public async Task<NoContentResult> Revoke(Guid grantId, CancellationToken cancellationToken)
     {
         if ((await roles.AnonymousGrantsAsync(cancellationToken)).All(g => g.Id != grantId))

@@ -18,10 +18,13 @@ namespace Toda.Guard.Controllers;
 /// The OpenIddict token endpoint. In M0 it serves the first-party Next.js server only: the password
 /// grant (checked against guard's directories, with rate limiting and audit) and refresh tokens
 /// (re-checking that the account is still active). See ADR 0007.
+/// Tokens say when the person last proved who they are (<c>auth_time</c>, <c>amr</c>), and a refresh keeps it. A
+/// refresh that carries <c>step_up_password</c> is a step-up (ADR 0042): the account's own directory checks the password
+/// and the new tokens start a new window; only Toda's own web server may ask, and too many failures end the session.
 /// </summary>
 [ApiExplorerSettings(IgnoreApi = true)]
 [UnitOfWork(IsDisabled = true)]
-public class TokenController(AuthService auth, GuardDb guardDb) : AbpControllerBase
+public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictTokenManager tokens) : AbpControllerBase
 {
     [HttpPost("~/connect/token")]
     [AllowAnonymous]
@@ -46,7 +49,7 @@ public class TokenController(AuthService auth, GuardDb guardDb) : AbpControllerB
                 });
             }
 
-            return SignIn(CreatePrincipal(result.Account!, request.GetScopes()), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+            return SignIn(CreatePrincipal(result.Account!, request.GetScopes(), DateTimeOffset.UtcNow), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         }
 
         if (request.IsRefreshTokenGrantType())
@@ -65,13 +68,48 @@ public class TokenController(AuthService auth, GuardDb guardDb) : AbpControllerB
                 return Refuse("The account is no longer active.");
             }
 
-            return SignIn(CreatePrincipal(account, refreshed.Principal!.GetScopes()), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+            // When the person last proved who they are travels with the session; a step-up moves it on.
+            DateTimeOffset? authTime = long.TryParse(refreshed.Principal!.GetClaim(Claims.AuthenticationTime), out long seconds)
+                ? DateTimeOffset.FromUnixTimeSeconds(seconds)
+                : null;
+            if (request.GetParameter(StepUpParameter)?.ToString() is { } password)
+            {
+                if (request.ClientId != GuardOidc.WebClientId)
+                {
+                    return Refuse("Only Toda's own web app can ask for a step-up.", Errors.UnauthorizedClient);
+                }
+
+                StepUpResult stepUp = await auth.StepUpAsync(account.Id, password, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+                if (!stepUp.Succeeded)
+                {
+                    if (stepUp.EndSession && refreshed.Principal.GetTokenId() is { } tokenId && await tokens.FindByIdAsync(tokenId, cancellationToken) is { } token)
+                    {
+                        await tokens.TryRevokeAsync(token, cancellationToken);
+                    }
+
+                    return Refuse(stepUp.EndSession ? "Too many wrong passwords: the session has ended. Sign in again." : "The password is incorrect.",
+                        stepUp.EndSession ? SessionEndedError : StepUpFailedError);
+                }
+
+                authTime = DateTimeOffset.UtcNow;
+            }
+
+            return SignIn(CreatePrincipal(account, refreshed.Principal.GetScopes(), authTime), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         }
 
         return Refuse("This grant type is not supported.", Errors.UnsupportedGrantType);
     }
 
-    private static ClaimsPrincipal CreatePrincipal(Account account, IEnumerable<string> scopes)
+    /// <summary>The token parameter that makes a refresh a step-up, with the password.</summary>
+    public const string StepUpParameter = "step_up_password";
+
+    /// <summary>The step-up's password was wrong; the session goes on.</summary>
+    public const string StepUpFailedError = "step_up_failed";
+
+    /// <summary>Too many wrong step-up passwords: the refresh token is revoked.</summary>
+    public const string SessionEndedError = "session_ended";
+
+    private static ClaimsPrincipal CreatePrincipal(Account account, IEnumerable<string> scopes, DateTimeOffset? authTime)
     {
         ClaimsIdentity identity = new(
             OpenIddictServerAspNetCoreDefaults.AuthenticationScheme,
@@ -81,6 +119,12 @@ public class TokenController(AuthService auth, GuardDb guardDb) : AbpControllerB
         identity.SetClaim(Claims.Subject, account.Id.ToString())
             .SetClaim(Claims.Name, account.Username)
             .SetClaim("display_name", account.DisplayName);
+        if (authTime is { } proved)
+        {
+            // Every sign-in so far is a password checked by the account's directory (OpenID Connect's "pwd").
+            identity.SetClaim(Claims.AuthenticationTime, proved.ToUnixTimeSeconds())
+                .SetClaims(Claims.AuthenticationMethodReference, ["pwd"]);
+        }
 
         identity.SetScopes(scopes.Intersect([Scopes.OfflineAccess, GuardOidc.ApiScope]));
         identity.SetDestinations(_ => [Destinations.AccessToken]);

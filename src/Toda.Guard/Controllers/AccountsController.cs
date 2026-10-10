@@ -140,6 +140,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     public Task<AccountDto> Lock(Guid id, CancellationToken cancellationToken) => SetLockedAsync(id, locked: true, cancellationToken);
 
     [HttpPost("{id:guid}/unlock")]
+    [StepUp]
     public Task<AccountDto> Unlock(Guid id, CancellationToken cancellationToken) => SetLockedAsync(id, locked: false, cancellationToken);
 
     private async Task<AccountDto> SetLockedAsync(Guid id, bool locked, CancellationToken cancellationToken)
@@ -183,6 +184,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
     /// <summary>Adds an address, verified; a placeholder with it is merged into this account.</summary>
     [HttpPost("{id:guid}/emails")]
+    [StepUp]
     public async Task<AccountEmailsDto> AddEmail(Guid id, [FromBody] AddEmailInput input, CancellationToken cancellationToken)
     {
         Account account = await AccountAsync(id, cancellationToken);
@@ -206,6 +208,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
     /// <summary>Where mail goes: one of the account's verified addresses, or null for its directory's.</summary>
     [HttpPut("{id:guid}/mail-to")]
+    [StepUp]
     public async Task<AccountEmailsDto> MailTo(Guid id, [FromBody] MailToInput input, CancellationToken cancellationToken)
     {
         Account account = await AccountAsync(id, cancellationToken);
@@ -238,6 +241,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     /// account that can sign in needs Confirm to be its username.
     /// </summary>
     [HttpPost("{id:guid}/merge")]
+    [StepUp]
     public async Task<AccountMergeDto> Merge(Guid id, [FromBody] MergeInput input, CancellationToken cancellationToken)
     {
         await EnsureMergeAsync(id, input.SurvivorId, cancellationToken);

@@ -34,6 +34,10 @@ public static class SecurityAuditTypes
     public const string MailToChanged = "account.address.mail-to";
     public const string SignUpChanged = "settings.signup";
     public const string RetentionChanged = "settings.audit";
+    public const string StepUpChanged = "settings.step-up";
+    public const string StepUpSucceeded = "auth.step-up.succeeded";
+    public const string StepUpFailed = "auth.step-up.failed";
+    public const string StepUpEndedSession = "auth.step-up.session-ended";
 }
 
 /// <summary>

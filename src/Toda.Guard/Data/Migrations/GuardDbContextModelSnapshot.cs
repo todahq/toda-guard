@@ -532,6 +532,11 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<int>("RetentionDays")
                         .HasColumnType("integer");
 
+                    b.Property<int>("StepUpMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(10);
+
                     b.HasKey("Id");
 
                     b.ToTable("security_settings", "guard");

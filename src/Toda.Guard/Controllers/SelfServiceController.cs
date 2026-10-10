@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Toda.Guard.Services;
+using Toda.Platform.Acting;
 using Toda.Platform;
 using Toda.Platform.Controllers;
 using Volo.Abp;
@@ -78,5 +79,6 @@ public class SignUpSettingsController(SelfService self) : GuardControllerBase
     public Task<SignUpSettingsDto> Get(CancellationToken cancellationToken) => self.SettingsAsync(cancellationToken);
 
     [HttpPut]
+    [StepUp]
     public Task<SignUpSettingsDto> Save([FromBody] SignUpSettingsInput input, CancellationToken cancellationToken) => self.SaveSettingsAsync(input, cancellationToken);
 }

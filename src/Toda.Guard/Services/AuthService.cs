@@ -56,6 +56,9 @@ public class LoginRateLimiter : ISingletonDependency
 /// <summary>MergedInto: the username to sign in with instead, when the account was merged (ADR 0044) and the password was right.</summary>
 public sealed record LoginResult(bool Succeeded, Account? Account, string? ErrorCode, string? MergedInto = null);
 
+/// <summary>A step-up's outcome: whether the password was right, and whether the session must end (too many failures).</summary>
+public sealed record StepUpResult(bool Succeeded, bool EndSession);
+
 public class AuthService(
     GuardDb guardDb,
     ConnectorCatalog connectors,
@@ -93,24 +96,9 @@ public class AuthService(
                 return (false, account, $"account_{account.Status.ToString().ToLowerInvariant()}");
             }
 
-            UserDirectory? directory = await db.Directories.FirstOrDefaultAsync(d => d.Id == account.DirectoryId, cancellationToken);
-            DirectoryUser? record = account.DirectoryUserId is { } id ? await db.DirectoryUsers.FindAsync([id], cancellationToken) : null;
-            if (directory is null || record is null || !directory.IsActive)
+            if (await CheckPasswordAsync(db, account, password, cancellationToken) is { } refused)
             {
-                return (false, account, "directory_inactive");
-            }
-
-            if (!directory.AuthenticationEnabled)
-            {
-                return (false, account, "directory_signin_disabled");
-            }
-
-            // The directory that owns the username is the only one asked. A same-named user in a
-            // lower-priority directory can never sign in as this account.
-            (bool authenticated, string? error) = await AuthenticateAsync(directory, record, password);
-            if (!authenticated)
-            {
-                return (false, account, error ?? "wrong_password");
+                return (false, account, refused);
             }
 
             account.LastLoginAt = DateTime.UtcNow;
@@ -150,6 +138,63 @@ public class AuthService(
 
         string? survivor = await db.Accounts.Where(a => a.Id == survivorId).Select(a => a.Username).FirstOrDefaultAsync(cancellationToken);
         return survivor is null ? "account_inactive" : $"account_merged:{survivor}";
+    }
+
+    /// <summary>
+    /// Step-up (ADR 0042): the account's own directory checks the password again, as at sign-in (a hash, or a bind for
+    /// LDAP). Failures count toward the sign-in limit; once it's reached, the session ends.
+    /// </summary>
+    public async Task<StepUpResult> StepUpAsync(Guid accountId, string password, string? ip, CancellationToken cancellationToken = default)
+    {
+        (Account? account, string? refused) = await guardDb.RunAsync(async db =>
+        {
+            Account? account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId, cancellationToken);
+            if (account is null || account.Status != AccountStatus.Active)
+            {
+                return (account, "account_inactive");
+            }
+
+            return (account, limiter.IsBlocked(account.NormalizedUsername, ip) ? "too_many_attempts" : await CheckPasswordAsync(db, account, password, cancellationToken));
+        }, cancellationToken: cancellationToken);
+
+        string? username = account?.NormalizedUsername;
+        if (refused is null)
+        {
+            limiter.Reset(username!);
+            await AuditAsync(SecurityAuditTypes.StepUpSucceeded, username, accountId, null, ip, cancellationToken);
+            return new StepUpResult(true, false);
+        }
+
+        if (username is not null && refused is "wrong_password" or "invalid_credentials")
+        {
+            limiter.RecordFailure(username, ip);
+        }
+
+        bool end = refused is "account_inactive" or "directory_inactive" or "directory_signin_disabled" || (username is not null && limiter.IsBlocked(username, ip));
+        await AuditAsync(end ? SecurityAuditTypes.StepUpEndedSession : SecurityAuditTypes.StepUpFailed, username, accountId, refused, ip, cancellationToken);
+        return new StepUpResult(false, end);
+    }
+
+    /// <summary>
+    /// The password checked by the directory that owns the account, and only that one: a same-named user in a
+    /// lower-priority directory can never sign in as this account. Null when it's right; otherwise why not.
+    /// </summary>
+    private async Task<string?> CheckPasswordAsync(GuardDbContext db, Account account, string password, CancellationToken cancellationToken)
+    {
+        UserDirectory? directory = await db.Directories.AsNoTracking().FirstOrDefaultAsync(d => d.Id == account.DirectoryId, cancellationToken);
+        DirectoryUser? record = account.DirectoryUserId is { } id ? await db.DirectoryUsers.FindAsync([id], cancellationToken) : null;
+        if (directory is null || record is null || !directory.IsActive)
+        {
+            return "directory_inactive";
+        }
+
+        if (!directory.AuthenticationEnabled)
+        {
+            return "directory_signin_disabled";
+        }
+
+        (bool authenticated, string? error) = await AuthenticateAsync(directory, record, password);
+        return authenticated ? null : error ?? "wrong_password";
     }
 
     public async Task<(bool Succeeded, string? Error)> AuthenticateAsync(UserDirectory directory, DirectoryUser record, string password)

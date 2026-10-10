@@ -164,6 +164,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
 
     /// <summary>Renames a group made in Toda, changes its description, and an organization's attributes and domains.</summary>
     [HttpPut("{id:guid}")]
+    [StepUp]
     public async Task<GroupDto> Update(Guid id, [FromBody] UpdateGroupInput input, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(input.Name) || input.Name.Trim().Length > 128)
@@ -216,6 +217,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
     }
 
     [HttpDelete("{id:guid}")]
+    [StepUp]
     public async Task<NoContentResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         if (id == GuardConstants.AdminsGroupId || id == GuardConstants.UsersGroupId)
@@ -246,6 +248,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
     public sealed record AddMemberInput(Guid? AccountId, Guid? GroupId);
 
     [HttpPost("{id:guid}/members")]
+    [StepUp]
     public async Task<NoContentResult> AddMember(Guid id, [FromBody] AddMemberInput input, CancellationToken cancellationToken)
     {
         if (input.AccountId is null == input.GroupId is null)
@@ -302,6 +305,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
     }
 
     [HttpDelete("{id:guid}/members/{memberType}/{memberId:guid}")]
+    [StepUp]
     public async Task<NoContentResult> RemoveMember(Guid id, string memberType, Guid memberId, CancellationToken cancellationToken)
     {
         string groupName = await guardDb.RunAsync(async db =>

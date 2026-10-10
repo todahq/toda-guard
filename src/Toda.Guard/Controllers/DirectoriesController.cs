@@ -52,6 +52,7 @@ public class DirectoriesController(
     }
 
     [HttpPost("directories")]
+    [StepUp]
     public async Task<DirectoryDto> Create([FromBody] DirectoryInput input, CancellationToken cancellationToken)
     {
         List<ConnectorDescription> available = await connectors.DescribeAllAsync();
@@ -87,6 +88,7 @@ public class DirectoriesController(
     }
 
     [HttpPut("directories/{id:guid}")]
+    [StepUp]
     public async Task<DirectoryDto> Update(Guid id, [FromBody] DirectoryInput input, CancellationToken cancellationToken)
     {
         List<ConnectorDescription> available = await connectors.DescribeAllAsync();
@@ -134,6 +136,7 @@ public class DirectoriesController(
     }
 
     [HttpPost("directories/reorder")]
+    [StepUp]
     public async Task<List<DirectoryDto>> Reorder([FromBody] ReorderInput input, CancellationToken cancellationToken)
     {
         List<ConnectorDescription> available = await connectors.DescribeAllAsync();
@@ -164,6 +167,7 @@ public class DirectoriesController(
     }
 
     [HttpDelete("directories/{id:guid}")]
+    [StepUp]
     public async Task<NoContentResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         if (id == GuardConstants.InternalDirectoryId)
