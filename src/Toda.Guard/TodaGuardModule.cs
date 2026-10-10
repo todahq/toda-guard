@@ -43,6 +43,8 @@ public class TodaGuardModule : AbpModule
         Configure<AbpDistributedEventBusOptions>(options => options.Outboxes.Configure(GuardDbContext.Schema, outbox =>
         {
             outbox.UseDbContext<GuardDbContext>();
+            // The outbox sender's lock is named after this: the module's own, or Projects' sender and this one wait on each other.
+            outbox.DatabaseName = GuardDbContext.Schema;
             outbox.Selector = type => EventCatalogOptions.IsEvent(type, typeof(AccountCreatedEto).Assembly);
         }));
 

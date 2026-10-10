@@ -4,4 +4,9 @@
     <Description>Public contracts of toda-guard: the directory connector SPI, lookups, and account and group events.</Description>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- The catalog's event base (CatalogEvent) and its handler interfaces (ADR 0047). -->
+    <ProjectReference Include="..\Toda.Sdk\Toda.Sdk.csproj" />
+  </ItemGroup>
+
 </Project>

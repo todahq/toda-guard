@@ -280,16 +280,17 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
                 Email = email.Trim(),
             }).Entity;
             await db.SaveChangesAsync(ct);
-            List<object> events = await projector.RebuildAsync(db, [normalized], ct);
+            List<object> made = await projector.RebuildAsync(db, [normalized], ct);
             await db.SaveChangesAsync(ct);
             await Organizations.ApplyDomainsAsync(db, ct);
-            return ((Guid?)await db.Accounts.Where(a => a.NormalizedUsername == normalized).Select(a => a.Id).FirstAsync(ct), events);
-        }, requiresNew: true, ct, isTransactional: true);
+            // In the sign-up's unit of work: the events commit with it (ADR 0047).
+            foreach (object e in made)
+            {
+                await Controllers.GuardEvents.PublishAsync(events, e, ct);
+            }
 
-        foreach (object e in created)
-        {
-            await Controllers.GuardEvents.PublishAsync(events, e, ct);
-        }
+            return ((Guid?)await db.Accounts.Where(a => a.NormalizedUsername == normalized).Select(a => a.Id).FirstAsync(ct), made);
+        }, requiresNew: true, ct, isTransactional: true);
 
         if (created.Count > 0)
         {

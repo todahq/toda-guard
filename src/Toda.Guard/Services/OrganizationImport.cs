@@ -61,18 +61,19 @@ public class OrganizationImport(GuardDb guardDb, IEventPublisher events) : ITran
             }
 
             await db.SaveChangesAsync(cancellationToken);
+            // In the import's unit of work: the events commit with it (ADR 0047).
+            if (created)
+            {
+                await GuardEvents.PublishAsync(events, new GroupCreatedEto(group.Id, group.Name), cancellationToken);
+            }
+
+            if (changed)
+            {
+                await GuardEvents.PublishAsync(events, new MembershipChangedEto(group.Id, group.Name), cancellationToken);
+            }
+
             return (group, created, changed);
         }, requiresNew: true, cancellationToken, isTransactional: true);
-
-        if (created)
-        {
-            await GuardEvents.PublishAsync(events, new GroupCreatedEto(group.Id, group.Name), cancellationToken);
-        }
-
-        if (changed)
-        {
-            await GuardEvents.PublishAsync(events, new MembershipChangedEto(group.Id, group.Name), cancellationToken);
-        }
 
         return group.Id;
     }

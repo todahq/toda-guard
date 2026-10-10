@@ -95,6 +95,11 @@ public class DirectorySyncService(
                 directory.LastSyncMessage = $"{run.UsersAdded} added, {run.UsersUpdated} updated, {run.UsersDeactivated} deactivated, {run.GroupsSynced} groups";
                 await db.SaveChangesAsync(cancellationToken);
                 await Organizations.ApplyDomainsAsync(db, cancellationToken); // emails may have changed
+                // In the sync's unit of work: its accounts' events commit with it (ADR 0047).
+                foreach (object e in pending)
+                {
+                    await PublishAsync(e, cancellationToken);
+                }
             }, requiresNew: true, cancellationToken, isTransactional: true);
         }
         catch (Exception ex)
@@ -119,20 +124,16 @@ public class DirectorySyncService(
             }, requiresNew: true, cancellationToken);
         }
 
-        foreach (object e in pending)
-        {
-            await PublishAsync(e, cancellationToken);
-        }
-
         if (run.Succeeded == true)
         {
             // Someone a placeholder stood for may have arrived with this sync (ADR 0044).
             await merges.FoldPlaceholdersAsync(MergeReasons.DirectorySync, cancellationToken);
         }
 
-        await events.PublishAsync(new DirectorySyncCompletedEto(
+        // Into Guard's outbox, in a unit of work of its own: the sync, or its failure, has committed already.
+        await guardDb.RunAsync(_ => events.PublishAsync(new DirectorySyncCompletedEto(
             directoryId, directoryName, run.Succeeded == true, run.UsersAdded, run.UsersUpdated, run.UsersDeactivated,
-            run.GroupsSynced, watch.Elapsed, run.Error), cancellationToken);
+            run.GroupsSynced, watch.Elapsed, run.Error), cancellationToken), requiresNew: true, cancellationToken, isTransactional: true);
 
         return run;
     }

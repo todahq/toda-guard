@@ -128,17 +128,17 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
             db.SecurityEvents.Add(new SecurityEvent(Guid.NewGuid(), "account.merged", survivor.Username, survivor.Id, detail, null));
             await db.SaveChangesAsync(ct);
             await Organizations.ApplyDomainsAsync(db, ct); // the survivor's addresses grew; the source's are gone
+            // In the merge's unit of work: the events commit with it (ADR 0047).
+            if (wasActive)
+            {
+                await events.PublishAsync(new AccountDeactivatedEto(merge.SourceId, merge.SourceUsername, $"Merged into {merge.SurvivorUsername}"), ct);
+            }
+
+            await events.PublishAsync(new AccountMergedEto(record.Id, merge.SourceId, merge.SourceUsername, merge.SurvivorId, merge.SurvivorUsername, actorId is null), ct);
             return (record, merge, wasActive);
         }, requiresNew: true, ct, isTransactional: true);
 
         await RunPluginsAsync(record.Id, merge, plugins, ct);
-
-        if (wasActive)
-        {
-            await events.PublishAsync(new AccountDeactivatedEto(merge.SourceId, merge.SourceUsername, $"Merged into {merge.SurvivorUsername}"), ct);
-        }
-
-        await events.PublishAsync(new AccountMergedEto(record.Id, merge.SourceId, merge.SourceUsername, merge.SurvivorId, merge.SurvivorUsername, actorId is null), ct);
         return await GetAsync(record.Id, ct);
     }
 
