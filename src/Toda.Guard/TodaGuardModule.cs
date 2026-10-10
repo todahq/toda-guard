@@ -36,6 +36,8 @@ public class TodaGuardModule : AbpModule
         Configure<AbpDbContextOptions>(options =>
             options.Configure<GuardDbContext>(c => c.UseNpgsql(npgsql =>
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", GuardDbContext.Schema))));
+        // The events Guard publishes for other modules and plugins (ADR 0047).
+        Configure<EventCatalogOptions>(options => options.AddAssembly(typeof(AccountCreatedEto).Assembly, GuardDbContext.Schema));
 
         // Sign-in: OpenIddict issues short-lived access tokens and rotating refresh tokens to the
         // first-party Next.js server; APIs validate them locally (ADR 0007).
