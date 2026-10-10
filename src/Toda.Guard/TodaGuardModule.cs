@@ -107,6 +107,7 @@ public class TodaGuardModule : AbpModule
         Configure<PluginHostServiceOptions>(options =>
         {
             options.Expose<IAccountLookup>();
+            options.Expose<IGroupLookup>();
             options.Expose<IMembershipResolver>();
             options.Expose<IAccountProvisioning>();
             options.Expose<IDirectoryConnectionProvider>((hostScope, plugin) => new PluginDirectoryConnectionProvider(hostScope, plugin.Key));
