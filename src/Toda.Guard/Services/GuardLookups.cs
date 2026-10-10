@@ -62,7 +62,7 @@ public class AccountLookup(GuardDb guardDb) : IAccountLookup, ITransientDependen
     }
 
     internal static AccountInfo ToInfo(Account a) => new(a.Id, a.Username, a.DisplayName, a.MailAddress, a.Status == AccountStatus.Active, a.DirectoryId, a.Language,
-        a.TimeZone, a.MergedIntoId);
+        a.TimeZone, a.MergedIntoId, a.IsService);
 }
 
 [ExposeServices(typeof(IGroupLookup))]

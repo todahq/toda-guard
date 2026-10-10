@@ -8,7 +8,7 @@ namespace Toda.Guard;
 /// preferences (null: the site's); MergedIntoId is the account it was merged into, if it was.
 /// </summary>
 public sealed record AccountInfo(Guid Id, string Username, string DisplayName, string? Email, bool IsActive, Guid DirectoryId, string? Language = null,
-    string? TimeZone = null, Guid? MergedIntoId = null);
+    string? TimeZone = null, Guid? MergedIntoId = null, bool IsService = false);
 
 /// <summary>A group as other modules see it; Kind is standard, directory, ou or organization (ADR 0037).</summary>
 public sealed record GroupInfo(Guid Id, string Name, string? Description, Guid DirectoryId, string Kind = "standard");
