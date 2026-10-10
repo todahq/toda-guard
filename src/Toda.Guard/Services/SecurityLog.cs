@@ -41,6 +41,15 @@ public static class SecurityAuditTypes
     public const string TokenCreated = "token.created";
     public const string TokenRevoked = "token.revoked";
     public const string TokenSettingsChanged = "settings.tokens";
+
+    /// <summary>OAuth for agents (M7): an MCP client registered itself, an admin made or removed an app.</summary>
+    public const string OAuthAppRegistered = "oauth.app.registered";
+    public const string OAuthAppCreated = "oauth.app.created";
+    public const string OAuthAppDeleted = "oauth.app.deleted";
+
+    /// <summary>A person allowed an app to act for them, or took that back.</summary>
+    public const string OAuthConsentGranted = "oauth.consent.granted";
+    public const string OAuthConsentRevoked = "oauth.consent.revoked";
 }
 
 /// <summary>

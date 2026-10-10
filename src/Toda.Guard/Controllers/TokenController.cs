@@ -24,7 +24,7 @@ namespace Toda.Guard.Controllers;
 /// </summary>
 [ApiExplorerSettings(IgnoreApi = true)]
 [UnitOfWork(IsDisabled = true)]
-public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictTokenManager tokens) : AbpControllerBase
+public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictTokenManager tokens, OAuthApps apps) : AbpControllerBase
 {
     [HttpPost("~/connect/token")]
     [AllowAnonymous]
@@ -52,9 +52,27 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
             return SignIn(CreatePrincipal(result.Account!, request.GetScopes(), DateTimeOffset.UtcNow), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         }
 
+        // An app's code (M7): exchanged once, with its PKCE verifier (OpenIddict checks both), while the person's
+        // permission stands and their account is active.
+        if (request.IsAuthorizationCodeGrantType())
+        {
+            AuthenticateResult code = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+            return await AppTokensAsync(code.Principal, cancellationToken);
+        }
+
         if (request.IsRefreshTokenGrantType())
         {
             AuthenticateResult refreshed = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+            if (refreshed.Principal?.GetClaim(Toda.Platform.Acting.ActingContext.TokenClaim) is not null)
+            {
+                if (request.GetParameter(StepUpParameter) is not null)
+                {
+                    return Refuse("Only Toda's own web app can ask for a step-up.", Errors.UnauthorizedClient);
+                }
+
+                return await AppTokensAsync(refreshed.Principal, cancellationToken);
+            }
+
             if (!Guid.TryParse(refreshed.Principal?.GetClaim(Claims.Subject), out Guid accountId))
             {
                 return Refuse("The session is no longer valid.");
@@ -98,6 +116,28 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
         }
 
         return Refuse("This grant type is not supported.", Errors.UnsupportedGrantType);
+    }
+
+    /// <summary>
+    /// New tokens for an app (M7): the person's permission must still stand and their account be active; the tokens keep
+    /// the permission's id and the access the person allowed.
+    /// </summary>
+    private async Task<IActionResult> AppTokensAsync(ClaimsPrincipal? granted, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(granted?.GetClaim(Claims.Subject), out Guid accountId) || !await apps.IsValidAsync(granted!.GetAuthorizationId(), cancellationToken))
+        {
+            return Refuse("The app is no longer allowed: ask the person again.");
+        }
+
+        Account? account = await guardDb.RunAsync(db => db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId, cancellationToken),
+            cancellationToken: cancellationToken);
+        if (account is null || account.Status != AccountStatus.Active)
+        {
+            return Refuse("The account is no longer active.");
+        }
+
+        return SignIn(AppPrincipals.For(account, granted.GetAuthorizationId()!, granted.GetClaim(Toda.Platform.Acting.ActingContext.TokenAccessClaim) ?? TokenAccess.Read,
+            granted.GetScopes()), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 
     /// <summary>The token parameter that makes a refresh a step-up, with the password.</summary>

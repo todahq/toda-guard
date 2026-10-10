@@ -64,9 +64,29 @@ public class TodaGuardModule : AbpModule
             .AddServer(options =>
             {
                 options.SetTokenEndpointUris("connect/token")
-                    .SetRevocationEndpointUris("connect/revoke");
-                options.AllowPasswordFlow().AllowRefreshTokenFlow();
-                options.RegisterScopes(OpenIddictConstants.Scopes.OfflineAccess, GuardOidc.ApiScope);
+                    .SetRevocationEndpointUris("connect/revoke")
+                    // Apps and agents (M7): the authorization code flow, always with PKCE, behind a consent page.
+                    .SetAuthorizationEndpointUris("connect/authorize");
+                options.AllowPasswordFlow().AllowRefreshTokenFlow().AllowAuthorizationCodeFlow().RequireProofKeyForCodeExchange();
+                options.RegisterScopes(OpenIddictConstants.Scopes.OfflineAccess, GuardOidc.ApiScope, OAuthAgents.ReadScope);
+                // MCP clients register themselves (RFC 7591) at the endpoint the discovery document names.
+                options.AddEventHandler<OpenIddict.Server.OpenIddictServerEvents.HandleConfigurationRequestContext>(handler => handler.UseInlineHandler(context =>
+                {
+                    if (context.Issuer is { } issuer)
+                    {
+                        context.Metadata["registration_endpoint"] = new Uri(issuer, "connect/register").AbsoluteUri;
+                        // Behind the web app, the endpoints are where the issuer is (the site's public address), not
+                        // where this request came in.
+                        context.AuthorizationEndpoint = new Uri(issuer, "connect/authorize");
+                        context.TokenEndpoint = new Uri(issuer, "connect/token");
+                        context.RevocationEndpoint = new Uri(issuer, "connect/revoke");
+                        context.JsonWebKeySetEndpoint = new Uri(issuer, ".well-known/jwks");
+                    }
+
+                    return default;
+                }).SetOrder(int.MaxValue - 100_000));
+                // PKCE with S256 only: "plain" would hand the verifier over in the clear (MCP requires S256).
+                options.Configure(server => server.CodeChallengeMethods.Remove(OpenIddictConstants.CodeChallengeMethods.Plain));
                 options.SetAccessTokenLifetime(TimeSpan.FromMinutes(15))
                     .SetRefreshTokenLifetime(TimeSpan.FromDays(14))
                     .SetRefreshTokenReuseLeeway(TimeSpan.FromSeconds(30));
@@ -76,7 +96,7 @@ public class TodaGuardModule : AbpModule
                     options.SetIssuer(new Uri(issuer));
                 }
 
-                OpenIddictServerAspNetCoreBuilder aspNetCore = options.UseAspNetCore().EnableTokenEndpointPassthrough();
+                OpenIddictServerAspNetCoreBuilder aspNetCore = options.UseAspNetCore().EnableTokenEndpointPassthrough().EnableAuthorizationEndpointPassthrough();
                 if (configuration.GetValue("Guard:Oidc:AllowHttp", false))
                 {
                     aspNetCore.DisableTransportSecurityRequirement();
