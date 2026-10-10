@@ -16,6 +16,8 @@ using Toda.Platform;
 using Toda.Platform.Controllers;
 using Toda.Platform.Plugins;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.EntityFrameworkCore.DistributedEvents;
+using Volo.Abp.EventBus.Distributed;
 using Volo.Abp.Modularity;
 
 namespace Toda.Guard;
@@ -36,8 +38,13 @@ public class TodaGuardModule : AbpModule
         Configure<AbpDbContextOptions>(options =>
             options.Configure<GuardDbContext>(c => c.UseNpgsql(npgsql =>
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", GuardDbContext.Schema))));
-        // The events Guard publishes for other modules and plugins (ADR 0047).
+        // The events Guard publishes for other modules and plugins (ADR 0047), sent from its outbox.
         Configure<EventCatalogOptions>(options => options.AddAssembly(typeof(AccountCreatedEto).Assembly, GuardDbContext.Schema));
+        Configure<AbpDistributedEventBusOptions>(options => options.Outboxes.Configure(GuardDbContext.Schema, outbox =>
+        {
+            outbox.UseDbContext<GuardDbContext>();
+            outbox.Selector = type => EventCatalogOptions.IsEvent(type, typeof(AccountCreatedEto).Assembly);
+        }));
 
         // Sign-in: OpenIddict issues short-lived access tokens and rotating refresh tokens to the
         // first-party Next.js server; APIs validate them locally (ADR 0007).

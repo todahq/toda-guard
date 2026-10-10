@@ -2,13 +2,17 @@ using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Domain;
 using Volo.Abp.Data;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.EntityFrameworkCore.DistributedEvents;
 
 namespace Toda.Guard.Data;
 
 [ConnectionStringName("Default")]
-public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbContext<GuardDbContext>(options)
+public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbContext<GuardDbContext>(options), IHasEventOutbox
 {
     public const string Schema = "guard";
+
+    /// <summary>The events Guard publishes for others, written with the change and sent after it (ADR 0047).</summary>
+    public DbSet<OutgoingEventRecord> OutgoingEvents { get; set; } = null!;
 
     public DbSet<UserDirectory> Directories => Set<UserDirectory>();
     public DbSet<DirectoryUser> DirectoryUsers => Set<DirectoryUser>();
@@ -31,6 +35,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     {
         base.OnModelCreating(builder);
         builder.HasDefaultSchema(Schema);
+        builder.ConfigureEventOutbox();
         builder.Ignore<MergeStep>(); // stored inside account_merges.Steps as JSON, never as entities of their own
         builder.Ignore<MergeStepCount>();
 
