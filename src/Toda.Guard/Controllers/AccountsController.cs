@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
+using Toda.Platform.Acting;
 using Casl;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities;
@@ -15,7 +16,8 @@ namespace Toda.Guard.Controllers;
 /// </summary>
 [Route("api/guard/accounts")]
 [Authorize]
-public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountProjector projector, AccountMergeService merges, AccountEmailService emails)
+public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountProjector projector, AccountMergeService merges, AccountEmailService emails,
+    SecurityLog audit)
     : GuardControllerBase
 {
     [HttpGet]
@@ -124,6 +126,8 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
             await Organizations.ApplyDomainsAsync(db, cancellationToken);
             Account account = await db.Accounts.FirstAsync(a => a.NormalizedUsername == normalized, cancellationToken);
             string directoryName = await db.Directories.Where(d => d.Id == account.DirectoryId).Select(d => d.Name).FirstAsync(cancellationToken);
+            audit.Add(db, SecurityAuditTypes.AccountCreated, Target(account), new { directory = directoryName });
+            await db.SaveChangesAsync(cancellationToken);
             return (AccountDto.From(account, directoryName), events);
         }, requiresNew: true, cancellationToken, isTransactional: true);
 
@@ -151,6 +155,11 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
             Account account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == id, cancellationToken)
                 ?? throw new EntityNotFoundException(typeof(Account), id);
             Ensure(ability, locked ? "lock" : "unlock", account);
+            if (account.LockedLocally != locked)
+            {
+                audit.Add(db, locked ? SecurityAuditTypes.AccountLocked : SecurityAuditTypes.AccountUnlocked, Target(account));
+            }
+
             account.LockedLocally = locked;
             await db.SaveChangesAsync(cancellationToken);
             List<object> events = await projector.RebuildAsync(db, [account.NormalizedUsername], cancellationToken);
@@ -176,23 +185,34 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     [HttpPost("{id:guid}/emails")]
     public async Task<AccountEmailsDto> AddEmail(Guid id, [FromBody] AddEmailInput input, CancellationToken cancellationToken)
     {
-        Ensure(await AbilityAsync(cancellationToken), "update", await AccountAsync(id, cancellationToken));
-        return await emails.AddVerifiedAsync(id, input.Email, CurrentAccountId, cancellationToken);
+        Account account = await AccountAsync(id, cancellationToken);
+        Ensure(await AbilityAsync(cancellationToken), "update", account);
+        AccountEmailsDto result = await emails.AddVerifiedAsync(id, input.Email, CurrentAccountId, cancellationToken);
+        // A verified address receives password resets and matches mail and sign-ups (ADR 0044).
+        await audit.WriteAsync(SecurityAuditTypes.AddressAdded, Target(account), new { email = input.Email.Trim() }, cancellationToken);
+        return result;
     }
 
     [HttpDelete("{id:guid}/emails/{emailId:guid}")]
     public async Task<AccountEmailsDto> RemoveEmail(Guid id, Guid emailId, CancellationToken cancellationToken)
     {
-        Ensure(await AbilityAsync(cancellationToken), "update", await AccountAsync(id, cancellationToken));
-        return await emails.RemoveAsync(id, emailId, cancellationToken);
+        Account account = await AccountAsync(id, cancellationToken);
+        Ensure(await AbilityAsync(cancellationToken), "update", account);
+        string? email = (await emails.ListAsync(id, cancellationToken)).Addresses.FirstOrDefault(a => a.Id == emailId)?.Email;
+        AccountEmailsDto result = await emails.RemoveAsync(id, emailId, cancellationToken);
+        await audit.WriteAsync(SecurityAuditTypes.AddressRemoved, Target(account), new { email }, cancellationToken);
+        return result;
     }
 
     /// <summary>Where mail goes: one of the account's verified addresses, or null for its directory's.</summary>
     [HttpPut("{id:guid}/mail-to")]
     public async Task<AccountEmailsDto> MailTo(Guid id, [FromBody] MailToInput input, CancellationToken cancellationToken)
     {
-        Ensure(await AbilityAsync(cancellationToken), "update", await AccountAsync(id, cancellationToken));
-        return await emails.SetMailToAsync(id, input.Email, cancellationToken);
+        Account account = await AccountAsync(id, cancellationToken);
+        Ensure(await AbilityAsync(cancellationToken), "update", account);
+        AccountEmailsDto result = await emails.SetMailToAsync(id, input.Email, cancellationToken);
+        await audit.WriteAsync(SecurityAuditTypes.MailToChanged, Target(account), new { email = result.MailTo }, cancellationToken);
+        return result;
     }
 
     // ---- Merging (ADR 0044) ----
@@ -230,6 +250,8 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         Ensure(ability, "merge", await AccountAsync(sourceId, cancellationToken));
         Ensure(ability, "merge", await AccountAsync(survivorId, cancellationToken));
     }
+
+    private static AuditTarget Target(Account account) => new("Account", account.Id, account.Username);
 
     private Task<Account> AccountAsync(Guid id, CancellationToken cancellationToken) => guardDb.RunAsync(async db =>
         await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, cancellationToken) ?? throw new EntityNotFoundException(typeof(Account), id),

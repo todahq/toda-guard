@@ -17,6 +17,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     public DbSet<GroupMembership> Memberships => Set<GroupMembership>();
     public DbSet<SyncRun> SyncRuns => Set<SyncRun>();
     public DbSet<SecurityEvent> SecurityEvents => Set<SecurityEvent>();
+    public DbSet<SecuritySettings> SecuritySettings => Set<SecuritySettings>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<RoleRule> RoleRules => Set<RoleRule>();
     public DbSet<RoleGrant> RoleGrants => Set<RoleGrant>();
@@ -191,7 +192,14 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
         {
             b.ToTable("security_events");
             b.Property(x => x.Type).HasMaxLength(64).IsRequired();
+            b.Property(x => x.ActingMode).HasMaxLength(32);
+            b.Property(x => x.TargetType).HasMaxLength(32);
+            b.Property(x => x.TargetName).HasMaxLength(256);
             b.HasIndex(x => x.Time);
+            b.HasIndex(x => x.AccountId);
+            b.HasIndex(x => x.TargetId);
         });
+
+        builder.Entity<SecuritySettings>(b => b.ToTable("security_settings"));
     }
 }

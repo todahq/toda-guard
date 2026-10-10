@@ -1,5 +1,5 @@
 using Toda.Platform;
-using System.Security.Claims;
+using Toda.Platform.Acting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Toda.Guard.Domain;
@@ -18,18 +18,20 @@ namespace Toda.Guard.Controllers;
 [ApiExplorerSettings(IgnoreApi = false)] // visible in /openapi/v1.json (ABP hides non-remote-service controllers otherwise)
 public abstract class GuardControllerBase : AbpControllerBase
 {
-    protected Guid CurrentAccountId =>
-        Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub"), out Guid id)
-            ? id
-            : throw new Volo.Abp.Authorization.AbpAuthorizationException("Not signed in.");
+    /// <summary>Whose rights the request uses and who is acting (ADR 0042).</summary>
+    protected ActingContext Acting => HttpContext.RequestServices.GetRequiredService<ActingContext>();
+
+    /// <summary>The account whose rights apply: the subject of the acting context.</summary>
+    protected Guid CurrentAccountId => Acting.SubjectId ?? throw new Volo.Abp.Authorization.AbpAuthorizationException("Not signed in.");
 
     protected string? ClientIp => HttpContext.Connection.RemoteIpAddress?.ToString();
 
+    /// <summary>The request's ability, with whatever limits its token carries (applied by <see cref="AbilityFactory"/>).</summary>
     protected Task<Casl.Ability> AbilityAsync(CancellationToken cancellationToken = default) =>
         HttpContext.RequestServices.GetRequiredService<AbilityFactory>().ForAccountAsync(CurrentAccountId, cancellationToken);
 
     /// <summary>Whether someone is signed in (an anonymous portal visitor isn't).</summary>
-    protected bool SignedIn => Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub"), out _);
+    protected bool SignedIn => Acting.SignedIn;
 
     /// <summary>The caller's ability, or for a visitor who isn't signed in, what's granted to the Anonymous principal (ADR 0037).</summary>
     protected Task<Casl.Ability> AbilityOrAnonymousAsync(CancellationToken cancellationToken = default) =>

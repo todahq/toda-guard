@@ -6,6 +6,7 @@ using Toda.Guard.Data;
 using Toda.Guard.Directories;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
+using Toda.Platform.Acting;
 using Toda.Platform.Controllers;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities;
@@ -20,7 +21,8 @@ public class DirectoriesController(
     DirectorySecrets secrets,
     DirectorySyncService sync,
     AccountProjector projector,
-    AuthService auth) : GuardControllerBase
+    AuthService auth,
+    SecurityLog audit) : GuardControllerBase
 {
     public sealed record DirectoryTypeDto(string Type, string DisplayName, List<string> Capabilities, List<DirectorySettingDefinition> Settings, string? PluginKey);
 
@@ -61,8 +63,17 @@ public class DirectoriesController(
         {
             int order = (await db.Directories.MaxAsync(d => (int?)d.Order, cancellationToken) ?? 0) + 1;
             UserDirectory directory = new(Guid.NewGuid(), RequireName(input.Name), input.Type, order);
-            Apply(directory, input, connector, isNew: true);
+            List<string> secretsSet = Apply(directory, input, connector, isNew: true);
             db.Directories.Add(directory);
+            audit.Add(db, SecurityAuditTypes.DirectoryCreated, Target(directory), new
+            {
+                type = directory.Type,
+                order = directory.Order,
+                isActive = directory.IsActive,
+                authenticationEnabled = directory.AuthenticationEnabled,
+                settings = Settings(directory),
+                secrets = secretsSet,
+            });
             await db.SaveChangesAsync(cancellationToken);
             await DirectoryGroups.EnsureAsync(db, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -94,8 +105,22 @@ public class DirectoriesController(
                 throw new UserFriendlyException($"The '{directory.Type}' connector is not available, so its settings can't be validated. Enable its plugin first.");
             }
 
+            var before = new { directory.Name, directory.IsActive, directory.AuthenticationEnabled, directory.SyncIntervalMinutes, Settings = Settings(directory) };
             directory.Name = RequireName(input.Name);
-            Apply(directory, input, connector, isNew: false);
+            List<string> secretsReplaced = Apply(directory, input, connector, isNew: false);
+            // Whoever can point a directory at another host, or change its bind password, sees every later sign-in's password.
+            Dictionary<string, string> after = Settings(directory);
+            audit.Add(db, SecurityAuditTypes.DirectoryUpdated, Target(directory), new
+            {
+                name = before.Name == directory.Name ? null : new { before = before.Name, after = directory.Name },
+                isActive = before.IsActive == directory.IsActive ? (bool?)null : directory.IsActive,
+                authenticationEnabled = before.AuthenticationEnabled == directory.AuthenticationEnabled ? (bool?)null : directory.AuthenticationEnabled,
+                syncIntervalMinutes = before.SyncIntervalMinutes == directory.SyncIntervalMinutes ? null : new { before = before.SyncIntervalMinutes, after = directory.SyncIntervalMinutes },
+                settings = before.Settings.Keys.Union(after.Keys)
+                    .Where(k => before.Settings.GetValueOrDefault(k) != after.GetValueOrDefault(k))
+                    .ToDictionary(k => k, k => new { before = before.Settings.GetValueOrDefault(k), after = after.GetValueOrDefault(k) }),
+                secrets = secretsReplaced,
+            });
             await db.SaveChangesAsync(cancellationToken);
             await DirectoryGroups.EnsureAsync(db, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -120,11 +145,14 @@ public class DirectoriesController(
                 throw new UserFriendlyException("Reorder needs every directory exactly once.");
             }
 
+            List<string> before = directories.OrderBy(d => d.Order).Select(d => d.Name).ToList();
             for (int i = 0; i < input.DirectoryIds.Count; i++)
             {
                 directories.First(d => d.Id == input.DirectoryIds[i]).Order = i;
             }
 
+            // The order decides which directory owns a username, and so whose password signs it in.
+            audit.Add(db, SecurityAuditTypes.DirectoriesReordered, null, new { before, after = directories.OrderBy(d => d.Order).Select(d => d.Name).ToList() });
             await db.SaveChangesAsync(cancellationToken);
             List<object> events = await projector.RebuildAsync(db, cancellationToken: cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -167,6 +195,7 @@ public class DirectoriesController(
             await db.DirectoryUsers.Where(u => u.DirectoryId == id).ExecuteDeleteAsync(cancellationToken);
             await db.SyncRuns.Where(r => r.DirectoryId == id).ExecuteDeleteAsync(cancellationToken);
             db.Directories.Remove(directory);
+            audit.Add(db, SecurityAuditTypes.DirectoryDeleted, Target(directory), new { type = directory.Type, users = userIds.Count, groups = groupIds.Count });
             await db.SaveChangesAsync(cancellationToken);
             List<object> events = await projector.RebuildAsync(db, cancellationToken: cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -254,14 +283,15 @@ public class DirectoriesController(
         await guardDb.RunAsync(db => db.Directories.AsNoTracking().FirstOrDefaultAsync(d => d.Id == id, cancellationToken), cancellationToken: cancellationToken)
         ?? throw new EntityNotFoundException(typeof(UserDirectory), id);
 
-    private void Apply(UserDirectory directory, DirectoryInput input, ConnectorDescription? connector, bool isNew)
+    /// <summary>Applies the input to the directory; returns the names of the secrets it set or replaced (never their values).</summary>
+    private List<string> Apply(UserDirectory directory, DirectoryInput input, ConnectorDescription? connector, bool isNew)
     {
         directory.IsActive = input.IsActive;
         directory.AuthenticationEnabled = input.AuthenticationEnabled;
         directory.SyncIntervalMinutes = input.SyncIntervalMinutes is > 0 ? input.SyncIntervalMinutes : null;
         if (connector is null)
         {
-            return;
+            return [];
         }
 
         Dictionary<string, string> incoming = input.Settings ?? new();
@@ -297,7 +327,13 @@ public class DirectoriesController(
 
         directory.SettingsJson = JsonSerializer.Serialize(plain);
         directory.ProtectedSecrets = secrets.Protect(secret);
+        return secret.Keys.Union(stored.Keys).Where(k => secret.GetValueOrDefault(k) != stored.GetValueOrDefault(k)).Order().ToList();
     }
+
+    private static AuditTarget Target(UserDirectory directory) => new("Directory", directory.Id, directory.Name);
+
+    private static Dictionary<string, string> Settings(UserDirectory directory) =>
+        JsonSerializer.Deserialize<Dictionary<string, string>>(directory.SettingsJson) ?? new();
 
     private static string RequireName(string name) =>
         string.IsNullOrWhiteSpace(name) || name.Trim().Length > 200

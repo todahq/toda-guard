@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
+using Toda.Platform.Acting;
 using Toda.Platform.Controllers;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities;
@@ -12,7 +13,7 @@ namespace Toda.Guard.Controllers;
 
 [Route("api/guard/groups")]
 [Authorize(Policy = TodaPolicies.Admin)]
-public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardControllerBase
+public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLog audit) : GuardControllerBase
 {
     [HttpGet]
     public Task<List<GroupDto>> List([FromQuery] string? search, [FromQuery] Guid? directoryId, [FromQuery] string? kind, CancellationToken cancellationToken) =>
@@ -147,6 +148,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
                 EmailDomains = domains,
             };
             db.Groups.Add(group);
+            audit.Add(db, SecurityAuditTypes.GroupCreated, Target(group), new { kind, emailDomains = domains });
             await db.SaveChangesAsync(cancellationToken);
             if (kind == GroupKinds.Organization)
             {
@@ -185,6 +187,8 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
                 throw new UserFriendlyException($"There's already a group called '{input.Name.Trim()}'.");
             }
 
+            string oldName = group.Name;
+            List<string> oldDomains = [.. group.EmailDomains];
             group.SetName(input.Name);
             group.Description = input.Description?.Trim();
             if (group.Kind == GroupKinds.Organization)
@@ -192,6 +196,12 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
                 (group.Attributes, group.EmailDomains) = Organization(input.Attributes, input.EmailDomains);
             }
 
+            // An organization's domains decide who is in it, and so who is a customer where it's granted (ADR 0037).
+            audit.Add(db, SecurityAuditTypes.GroupUpdated, Target(group), new
+            {
+                name = oldName == group.Name ? null : new { before = oldName, after = group.Name },
+                emailDomains = oldDomains.SequenceEqual(group.EmailDomains) ? null : new { before = oldDomains, after = group.EmailDomains },
+            });
             await db.SaveChangesAsync(cancellationToken);
             if (group.Kind == GroupKinds.Organization)
             {
@@ -224,8 +234,9 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
                     : $"'{group.Name}' is synced from a directory. Delete it there.");
             }
 
-            await db.Memberships.Where(m => m.GroupId == id || (m.MemberType == MemberType.Group && m.MemberId == id)).ExecuteDeleteAsync(cancellationToken);
+            int memberships = await db.Memberships.Where(m => m.GroupId == id || (m.MemberType == MemberType.Group && m.MemberId == id)).ExecuteDeleteAsync(cancellationToken);
             db.Groups.Remove(group);
+            audit.Add(db, SecurityAuditTypes.GroupDeleted, Target(group), new { kind = group.Kind, memberships });
             await db.SaveChangesAsync(cancellationToken);
         }, requiresNew: true, cancellationToken, isTransactional: true);
 
@@ -279,6 +290,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
             if (!await db.Memberships.AnyAsync(m => m.GroupId == id && m.MemberType == type && m.MemberId == memberId && m.Source == MembershipSource.Manual, cancellationToken))
             {
                 db.Memberships.Add(new GroupMembership(Guid.NewGuid(), id, type, memberId, MembershipSource.Manual));
+                audit.Add(db, SecurityAuditTypes.MembershipAdded, await MemberTargetAsync(db, type, memberId, cancellationToken), new { group = Target(group) });
                 await db.SaveChangesAsync(cancellationToken);
             }
 
@@ -326,6 +338,8 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
             }
 
             db.Memberships.Remove(manual);
+            audit.Add(db, SecurityAuditTypes.MembershipRemoved,
+                await MemberTargetAsync(db, types.Contains(MemberType.Group) ? MemberType.Group : MemberType.Account, memberId, cancellationToken), new { group = Target(group) });
             await db.SaveChangesAsync(cancellationToken);
             return group.Name;
         }, requiresNew: true, cancellationToken);
@@ -333,6 +347,14 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph) : GuardCon
         await PublishAsync([new MembershipChangedEto(id, groupName)]);
         return NoContent();
     }
+
+    private static AuditTarget Target(Group group) => new("Group", group.Id, group.Name);
+
+    /// <summary>Whose rights a membership changes: the account, or the group nested in another.</summary>
+    private static async Task<AuditTarget> MemberTargetAsync(GuardDbContext db, MemberType type, Guid id, CancellationToken cancellationToken) =>
+        type == MemberType.Group
+            ? new AuditTarget("Group", id, await db.Groups.Where(g => g.Id == id).Select(g => g.Name).FirstOrDefaultAsync(cancellationToken))
+            : new AuditTarget("Account", id, await db.Accounts.Where(a => a.Id == id).Select(a => a.Username).FirstOrDefaultAsync(cancellationToken));
 
     private static bool IsWritable(Group group) => !group.Computed && (group.IsLocal || group.DirectoryId == GuardConstants.InternalDirectoryId);
 

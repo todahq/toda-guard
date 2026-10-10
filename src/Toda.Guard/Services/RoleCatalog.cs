@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Casl;
+using Toda.Guard.Data;
 using Toda.Guard.Domain;
+using Toda.Platform.Acting;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Entities;
@@ -21,7 +23,7 @@ public sealed record GrantInfo(
 /// system: a project role is a system role whose rules use ${grant.projectId}, and a member is a grant with
 /// scope {"projectId": …} and scope key "project:{id}".
 /// </summary>
-public class RoleCatalog(GuardDb guardDb, MembershipGraph graph) : ITransientDependency
+public class RoleCatalog(GuardDb guardDb, MembershipGraph graph, SecurityLog audit) : ITransientDependency
 {
     public static readonly System.Text.RegularExpressions.Regex KeyPattern = new("^[a-z][a-z0-9-]{1,63}$");
 
@@ -74,6 +76,7 @@ public class RoleCatalog(GuardDb guardDb, MembershipGraph graph) : ITransientDep
         return guardDb.RunAsync(async db =>
         {
             Role? role = await db.Roles.FirstOrDefaultAsync(r => r.Key == definition.Key, cancellationToken);
+            bool created = role is null;
             if (role is null)
             {
                 role = new Role(Guid.NewGuid(), definition.Key, definition.Name, isSystem: true) { Description = definition.Description };
@@ -100,6 +103,10 @@ public class RoleCatalog(GuardDb guardDb, MembershipGraph graph) : ITransientDep
                 {
                     db.RoleRules.Add(new RoleRule(Guid.NewGuid(), role.Id, i, wanted[i]));
                 }
+
+                // A role in code changes when Toda or a plugin is upgraded: what it allows changes for everyone who holds it.
+                audit.Add(db, created ? SecurityAuditTypes.RoleCreated : SecurityAuditTypes.RoleUpdated, RoleTarget(role),
+                    new { system = true, rules = definition.Rules, before = created ? null : existing.Select(r => JsonNode.Parse(r.Json)).ToList() });
             }
 
             await db.SaveChangesAsync(cancellationToken);
@@ -120,10 +127,8 @@ public class RoleCatalog(GuardDb guardDb, MembershipGraph graph) : ITransientDep
         DateTime? validUntil, Guid? createdBy, CancellationToken cancellationToken = default) =>
         guardDb.RunAsync(async db =>
         {
-            if (!await db.Roles.AnyAsync(r => r.Id == roleId, cancellationToken))
-            {
-                throw new EntityNotFoundException(typeof(Role), roleId);
-            }
+            Role role = await db.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.Id == roleId, cancellationToken)
+                ?? throw new EntityNotFoundException(typeof(Role), roleId);
 
             bool principalExists = principalType switch
             {
@@ -153,6 +158,8 @@ public class RoleCatalog(GuardDb guardDb, MembershipGraph graph) : ITransientDep
                 CreatedBy = createdBy,
             };
             db.RoleGrants.Add(grant);
+            audit.Add(db, SecurityAuditTypes.GrantAdded, await PrincipalTargetAsync(db, principalType, principalId, cancellationToken),
+                GrantDetail(grant, role));
             await db.SaveChangesAsync(cancellationToken);
             return grant.Id;
         }, cancellationToken: cancellationToken);
@@ -168,8 +175,34 @@ public class RoleCatalog(GuardDb guardDb, MembershipGraph graph) : ITransientDep
             }
 
             db.RoleGrants.Remove(grant);
+            Role? role = await db.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.Id == grant.RoleId, cancellationToken);
+            audit.Add(db, SecurityAuditTypes.GrantRemoved, await PrincipalTargetAsync(db, grant.PrincipalType, grant.PrincipalId, cancellationToken),
+                GrantDetail(grant, role));
             await db.SaveChangesAsync(cancellationToken);
         }, cancellationToken: cancellationToken);
+
+    public static AuditTarget RoleTarget(Role role) => new("Role", role.Id, role.Name);
+
+    /// <summary>Whose rights a grant changes: the account, the group, or Anonymous visitors.</summary>
+    public static async Task<AuditTarget> PrincipalTargetAsync(GuardDbContext db, PrincipalType type, Guid id, CancellationToken cancellationToken)
+    {
+        string? name = type switch
+        {
+            PrincipalType.Account => await db.Accounts.Where(a => a.Id == id).Select(a => a.Username).FirstOrDefaultAsync(cancellationToken),
+            PrincipalType.Group => await db.Groups.Where(g => g.Id == id).Select(g => g.Name).FirstOrDefaultAsync(cancellationToken),
+            _ => AnonymousName,
+        };
+        return new AuditTarget(type.ToString(), id, name);
+    }
+
+    private static object GrantDetail(RoleGrant grant, Role? role) => new
+    {
+        grant = grant.Id,
+        role = role is null ? null : new { id = role.Id, key = role.Key, name = role.Name },
+        scope = JsonNode.Parse(grant.ScopeJson),
+        scopeKey = grant.ScopeKey,
+        validUntil = grant.ValidUntil,
+    };
 
     /// <summary>How the Anonymous principal is named where grants are listed.</summary>
     public const string AnonymousName = "Anonymous visitors";

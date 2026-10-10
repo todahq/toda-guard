@@ -475,11 +475,32 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<Guid?>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ActingAccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActingMode")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<string>("Detail")
                         .HasColumnType("text");
 
                     b.Property<string>("Ip")
                         .HasColumnType("text");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("TargetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TargetName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("TargetType")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.Property<DateTime>("Time")
                         .HasColumnType("timestamp with time zone");
@@ -494,9 +515,26 @@ namespace Toda.Guard.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("TargetId");
+
                     b.HasIndex("Time");
 
                     b.ToTable("security_events", "guard");
+                });
+
+            modelBuilder.Entity("Toda.Guard.Domain.SecuritySettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("RetentionDays")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("security_settings", "guard");
                 });
 
             modelBuilder.Entity("Toda.Guard.Domain.SignUpSettings", b =>

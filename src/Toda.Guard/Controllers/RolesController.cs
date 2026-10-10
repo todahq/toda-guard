@@ -15,7 +15,7 @@ namespace Toda.Guard.Controllers;
 /// <summary>Roles hold rules in CASL's format; grants give a role to an account or a group, with a scope.</summary>
 [Route("api/guard/roles")]
 [Authorize(Policy = TodaPolicies.Admin)]
-public class RolesController(GuardDb guardDb, RoleCatalog roleCatalog) : GuardControllerBase
+public class RolesController(GuardDb guardDb, RoleCatalog roleCatalog, SecurityLog audit) : GuardControllerBase
 {
     public sealed record GrantDto(Guid Id, string PrincipalType, Guid PrincipalId, string PrincipalName, JsonNode? Scope, DateTime? ValidUntil, DateTime CreatedAt);
 
@@ -93,6 +93,7 @@ public class RolesController(GuardDb guardDb, RoleCatalog roleCatalog) : GuardCo
                 db.RoleRules.Add(new RoleRule(Guid.NewGuid(), role.Id, i, input.Rules[i].ToJsonString()));
             }
 
+            audit.Add(db, SecurityAuditTypes.RoleCreated, RoleCatalog.RoleTarget(role), new { key = role.Key, rules = input.Rules });
             await db.SaveChangesAsync(cancellationToken);
             return role.Id;
         }, requiresNew: true, cancellationToken);

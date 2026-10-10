@@ -299,7 +299,11 @@ public class SyncRun : Entity<Guid>
     public string? Error { get; set; }
 }
 
-/// <summary>Security audit: sign-ins, failures, blocks, admin changes.</summary>
+/// <summary>
+/// The security audit (ADR 0042): sign-ins and their failures, exports, and every change to who may do what. The
+/// account is whoever the event counts as (who signed in, who made the change); the actor, who acted for them when that
+/// was someone else; the target, what the change was made to. Nothing edits or deletes a row but the retention.
+/// </summary>
 public class SecurityEvent : Entity<Guid>
 {
     protected SecurityEvent()
@@ -322,4 +326,34 @@ public class SecurityEvent : Entity<Guid>
     public Guid? AccountId { get; private set; }
     public string? Detail { get; private set; }
     public string? Ip { get; private set; }
+
+    public Guid? ActingAccountId { get; init; }
+    public string? ActingMode { get; init; }
+
+    /// <summary>The impersonation session the change was made in.</summary>
+    public Guid? SessionId { get; init; }
+
+    public string? TargetType { get; init; }
+    public Guid? TargetId { get; init; }
+    public string? TargetName { get; init; }
+}
+
+/// <summary>The site's security settings (one row): how long the security audit keeps its events.</summary>
+public class SecuritySettings : Entity<Guid>
+{
+    public static readonly Guid SingletonId = new("5ec0a0d1-0000-4000-8000-000000000001");
+
+    public const int DefaultRetentionDays = 730;
+    public const int MinRetentionDays = 90;
+    public const int MaxRetentionDays = 3650;
+
+    protected SecuritySettings()
+    {
+    }
+
+    public SecuritySettings(Guid id) : base(id)
+    {
+    }
+
+    public int RetentionDays { get; set; } = DefaultRetentionDays;
 }

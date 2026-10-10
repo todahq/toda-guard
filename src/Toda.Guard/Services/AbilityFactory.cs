@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Casl;
 using Toda.Guard.Domain;
+using Toda.Platform.Acting;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
@@ -32,17 +33,32 @@ public static class GuardSubjects
 }
 
 /// <summary>
+/// Narrows the request's own ability (ADR 0042): a token's scopes, an impersonation's fixed denies. Applied by
+/// <see cref="AbilityFactory"/> to the request's subject only, so no path to that person's ability skips it.
+/// </summary>
+public interface IAbilityLimit
+{
+    Ability Apply(Ability ability, ActingContext acting);
+}
+
+/// <summary>
 /// Builds an account's <see cref="Ability"/> from the roles granted to it directly or to any of its effective
 /// groups (nested groups count). Each grant's scope fills that grant's ${grant.*} placeholders.
 /// Kept between requests while the permission stamp stays the same (ADR 0041), and within a request once read.
+/// The one way to an ability (ADR 0042): when the account is the request's subject, the request's limits apply.
 /// </summary>
-public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<AbilityFactory> logger, IEnumerable<IGrantScopeExpander> expanders, AbilityCache kept)
+public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<AbilityFactory> logger, IEnumerable<IGrantScopeExpander> expanders, AbilityCache kept,
+    ActingContext acting, IEnumerable<IAbilityLimit> limits)
     : IScopedDependency
 {
     private readonly Dictionary<Guid, Ability> _cache = [];
 
     public static Ability None { get; } = new AbilityBuilder(GuardSubjects.Registry, GuardSubjects.Options).Build();
 
+    /// <summary>
+    /// The account's ability: its own for anyone else (a notice's recipient, a mail's sender), and for the request's
+    /// subject, its own with the request's limits.
+    /// </summary>
     public async Task<Ability> ForAccountAsync(Guid accountId, CancellationToken cancellationToken = default)
     {
         if (_cache.TryGetValue(accountId, out Ability? cached))
@@ -50,12 +66,22 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
             return cached;
         }
 
+        Ability own = await OwnAsync(accountId, cancellationToken);
+        return _cache[accountId] = Limit(own, accountId, acting, limits);
+    }
+
+    /// <summary>The request's limits, on the request's subject only.</summary>
+    public static Ability Limit(Ability own, Guid accountId, ActingContext acting, IEnumerable<IAbilityLimit> limits) =>
+        acting.SubjectId == accountId ? limits.Aggregate(own, (ability, limit) => limit.Apply(ability, acting)) : own;
+
+    private async Task<Ability> OwnAsync(Guid accountId, CancellationToken cancellationToken)
+    {
         // The stamp is read before anything the ability is built from, so an ability is never kept under a stamp newer
         // than its data.
         long stamp = await StampAsync(cancellationToken);
         if (kept.TryGet(accountId, stamp, out Ability keptAbility))
         {
-            return _cache[accountId] = keptAbility;
+            return keptAbility;
         }
 
         (Ability ability, DateTime? until) = await guardDb.RunAsync(async db =>
@@ -84,7 +110,6 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
         }, cancellationToken: cancellationToken);
 
         kept.Set(accountId, stamp, ability, until);
-        _cache[accountId] = ability;
         return ability;
     }
 

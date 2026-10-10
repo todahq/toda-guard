@@ -83,6 +83,7 @@ public class TodaGuardModule : AbpModule
         context.Services.AddTransient<IAuthorizationHandler, TodaAdminHandler>();
 
         context.Services.AddHostedService<DirectorySyncScheduler>();
+        context.Services.AddHostedService<SecurityAuditRetention>();
 
         Configure<TodaPlatformOptions>(options => options.ModuleVersions["toda-guard"] = Version);
 
@@ -110,14 +111,14 @@ public sealed class TodaAdminRequirement : IAuthorizationRequirement;
 
 /// <summary>
 /// Admin = may "manage" "all". Out of the box that comes from the Administrator role, granted to the
-/// internal toda-admins group (by id, never by name), so it follows group membership including nesting.
+/// internal toda-admins group (by id, never by name), so it follows group membership including nesting. The ability
+/// is the request's, through the acting context, so a token's limits apply here too (ADR 0042).
 /// </summary>
-public sealed class TodaAdminHandler(AbilityFactory abilities) : AuthorizationHandler<TodaAdminRequirement>
+public sealed class TodaAdminHandler(AbilityFactory abilities, Toda.Platform.Acting.ActingContext acting) : AuthorizationHandler<TodaAdminRequirement>
 {
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, TodaAdminRequirement requirement)
     {
-        string? sub = context.User.FindFirst("sub")?.Value ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (Guid.TryParse(sub, out Guid accountId) && (await abilities.ForAccountAsync(accountId)).Can("manage", "all"))
+        if (acting.SubjectId is Guid accountId && (await abilities.ForAccountAsync(accountId)).Can("manage", "all"))
         {
             context.Succeed(requirement);
         }
