@@ -389,8 +389,8 @@ public static class TokenAccess
 
 /// <summary>
 /// A personal access token (M7, ADR 0042): a secret an account uses as a bearer token, shown once and kept only as its
-/// hash. It can do no more than the account; it may be limited to reading and to some projects, it always expires,
-/// and it can never do a sensitive action.
+/// hash. It can do no more than the account; it may be limited to reading, to some projects and to some tools (an
+/// agent's), it always expires, and it can never do a sensitive action.
 /// </summary>
 public class PersonalAccessToken : Entity<Guid>
 {
@@ -398,9 +398,11 @@ public class PersonalAccessToken : Entity<Guid>
     {
     }
 
-    public PersonalAccessToken(Guid id, Guid accountId, string name, string prefix, string secretHash, string access, List<Guid>? projectIds, DateTime expiresAt, Guid createdBy)
+    public PersonalAccessToken(Guid id, Guid accountId, string name, string prefix, string secretHash, string access, List<Guid>? projectIds, DateTime expiresAt, Guid createdBy,
+        List<string>? tools = null)
         : base(id)
     {
+        Tools = tools;
         AccountId = accountId;
         Name = name;
         Prefix = prefix;
@@ -425,6 +427,9 @@ public class PersonalAccessToken : Entity<Guid>
 
     /// <summary>The projects it's limited to; null for every project the account may use.</summary>
     public List<Guid>? ProjectIds { get; private set; }
+
+    /// <summary>The tools it may use (their catalog names, M7); null for every tool the account may use.</summary>
+    public List<string>? Tools { get; private set; }
 
     public DateTime ExpiresAt { get; private set; }
     public DateTime CreatedAt { get; private set; }

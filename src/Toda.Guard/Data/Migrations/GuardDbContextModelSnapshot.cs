@@ -429,6 +429,9 @@ namespace Toda.Guard.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.PrimitiveCollection<List<string>>("Tools")
+                        .HasColumnType("text[]");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId");

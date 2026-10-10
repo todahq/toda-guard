@@ -18,21 +18,25 @@ namespace Toda.Guard.Services;
 /// <summary>A personal access token as lists show it: never its secret.</summary>
 public sealed record PersonalTokenDto(
     Guid Id, Guid AccountId, string Username, string Name, string Prefix, string Access, List<TokenProjectDto>? Projects,
-    DateTime ExpiresAt, DateTime CreatedAt, DateTime? LastUsedAt, string? LastUsedIp, DateTime? RevokedAt, bool Active);
+    DateTime ExpiresAt, DateTime CreatedAt, DateTime? LastUsedAt, string? LastUsedIp, DateTime? RevokedAt, bool Active, List<string>? Tools = null);
 
 public sealed record TokenProjectDto(Guid Id, string Label, string? Href);
 
 /// <summary>A token just made: the only time its secret is shown.</summary>
 public sealed record NewPersonalTokenDto(PersonalTokenDto Token, string Secret);
 
-/// <summary>A token to make: a name, read or write, the projects it's limited to (none for all), and how many days it lives.</summary>
-public sealed record CreatePersonalTokenInput(string Name, string Access, List<Guid>? ProjectIds, int Days);
+/// <summary>
+/// A token to make: a name, read or write, the projects it's limited to (none for all), how many days it lives, and the
+/// tools an agent may use with it (none for all, M7).
+/// </summary>
+public sealed record CreatePersonalTokenInput(string Name, string Access, List<Guid>? ProjectIds, int Days, List<string>? Tools = null);
 
 /// <summary>
 /// Personal access tokens (M7): made, listed, revoked, and found by their secret. A token is <c>toda_pat_</c> and 43
 /// random characters; only its SHA-256 is kept.
 /// </summary>
-public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGrantScopeDescriber> describers) : ITransientDependency
+public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGrantScopeDescriber> describers, Toda.Platform.Tools.ToolCatalog tools)
+    : ITransientDependency
 {
     public const string SecretPrefix = "toda_pat_";
 
@@ -62,6 +66,24 @@ public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGra
             }
         }
 
+        List<string>? limitedTo = input.Tools is { Count: > 0 } named ? named.Distinct(StringComparer.Ordinal).ToList() : null;
+        if (limitedTo is not null)
+        {
+            Dictionary<string, Toda.Platform.Tools.ToolInfo> catalog = (await tools.ListAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+            foreach (string tool in limitedTo)
+            {
+                if (!catalog.TryGetValue(tool, out Toda.Platform.Tools.ToolInfo? info))
+                {
+                    throw new UserFriendlyException($"There's no tool {tool}.");
+                }
+
+                if (input.Access == TokenAccess.Read && !info.Hints.ReadOnly)
+                {
+                    throw new UserFriendlyException($"{tool} changes things, and this token may only read.");
+                }
+            }
+        }
+
         byte[] random = RandomNumberGenerator.GetBytes(32);
         string secret = SecretPrefix + Base64UrlEncoder(random);
         (PersonalAccessToken token, Account account) = await guardDb.RunAsync(async db =>
@@ -81,10 +103,10 @@ public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGra
             }
 
             PersonalAccessToken token = new(Guid.NewGuid(), accountId, name, secret[..(SecretPrefix.Length + 4)], Hash(secret), input.Access, projects,
-                DateTime.UtcNow.AddDays(input.Days), createdBy);
+                DateTime.UtcNow.AddDays(input.Days), createdBy, limitedTo);
             db.PersonalAccessTokens.Add(token);
             audit.Add(db, SecurityAuditTypes.TokenCreated, new AuditTarget("Account", account.Id, account.Username),
-                new { token = token.Id, name, prefix = token.Prefix, access = token.Access, projects, expiresAt = token.ExpiresAt });
+                new { token = token.Id, name, prefix = token.Prefix, access = token.Access, projects, tools = limitedTo, expiresAt = token.ExpiresAt });
             await db.SaveChangesAsync(cancellationToken);
             return (token, account);
         }, requiresNew: true, cancellationToken);
@@ -166,7 +188,7 @@ public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGra
         return tokens.Select(t => new PersonalTokenDto(
                 t.Id, t.AccountId, usernames.GetValueOrDefault(t.AccountId, "(removed)"), t.Name, t.Prefix, t.Access,
                 t.ProjectIds?.Select(p => labels.TryGetValue(ScopeKey(p), out GrantScopeLabel? l) ? new TokenProjectDto(p, l.Label, l.Href) : new TokenProjectDto(p, p.ToString(), null)).ToList(),
-                t.ExpiresAt, t.CreatedAt, t.LastUsedAt, t.LastUsedIp, t.RevokedAt, t.IsActive(now)))
+                t.ExpiresAt, t.CreatedAt, t.LastUsedAt, t.LastUsedIp, t.RevokedAt, t.IsActive(now), t.Tools))
             .ToList();
     }
 
@@ -228,6 +250,11 @@ public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOpt
         identity.AddClaim(new Claim("display_name", found.Account.DisplayName));
         identity.AddClaim(new Claim(ActingContext.TokenClaim, found.Token.Id.ToString()));
         identity.AddClaim(new Claim(ActingContext.TokenAccessClaim, found.Token.Access));
+        foreach (string tool in found.Token.Tools ?? [])
+        {
+            identity.AddClaim(new Claim(ActingContext.TokenToolClaim, tool));
+        }
+
         foreach (Guid project in found.Token.ProjectIds ?? [])
         {
             identity.AddClaim(new Claim(ActingContext.TokenProjectClaim, project.ToString()));
