@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using Toda.Platform.Keys;
 using Npgsql;
 
 namespace Toda.Guard.Services;
@@ -62,8 +63,7 @@ public static class OidcKeys
     /// <summary>The keys in Postgres, made once under a lock: from the old key files when they're there, else new.</summary>
     private static (string SigningPem, string EncryptionKey) FromDatabase(string connectionString, string legacyFolder)
     {
-        using NpgsqlConnection connection = new(connectionString);
-        connection.Open();
+        using NpgsqlConnection connection = KeyDatabase.Open(connectionString);
         using NpgsqlTransaction transaction = connection.BeginTransaction();
         Execute(connection, transaction, $"SELECT pg_advisory_xact_lock({KeysLock})");
         Execute(connection, transaction, """
