@@ -25,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- CASL .NET, the open-source authorization library (github.com/tekthar/casl-net). -->
+    <!-- CASL .NET, the open-source authorization library. -->
     <PackageReference Include="Casl.Net" Version="0.1.0" />
   </ItemGroup>
 
