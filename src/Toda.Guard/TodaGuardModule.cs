@@ -50,9 +50,9 @@ public class TodaGuardModule : AbpModule
 
         // Sign-in: OpenIddict issues short-lived access tokens and rotating refresh tokens to the
         // first-party Next.js server; APIs validate them locally (ADR 0007).
-        string dataRoot = configuration["Toda:DataRoot"] ?? Path.Combine(context.Services.GetHostingEnvironment().ContentRootPath, "App_Data");
-        string keysFolder = Path.GetFullPath(configuration["Guard:Oidc:KeysPath"] ?? Path.Combine(dataRoot, "oidc-keys"));
-        (SecurityKey signingKey, SecurityKey encryptionKey) = OidcKeys.LoadOrCreate(keysFolder);
+        // Their keys (ADR 0050): certificates, a folder mounted from a secret store, or Postgres (made once, shared by every node).
+        string dataRoot = Path.GetFullPath(configuration["Toda:DataRoot"] ?? Path.Combine(context.Services.GetHostingEnvironment().ContentRootPath, "App_Data"));
+        (SecurityKey signingKey, SecurityKey encryptionKey) = OidcKeys.Resolve(configuration, dataRoot);
 
         context.Services.AddDbContext<OidcDbContext>(options =>
         {
