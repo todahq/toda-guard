@@ -431,6 +431,15 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
         string subject = source.Id.ToString();
         await db.Database.ExecuteSqlInterpolatedAsync($"""UPDATE guard.oidc_tokens SET "Status" = 'revoked' WHERE "Subject" = {subject} AND "Status" <> 'revoked'""", ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"""UPDATE guard.oidc_authorizations SET "Status" = 'revoked' WHERE "Subject" = {subject} AND "Status" <> 'revoked'""", ct);
+
+        // So do its access tokens (M7): each was made for its rights, so it isn't handed to the survivor. Tokens it made or
+        // revoked for others, and addresses it added, are the survivor's doing now.
+        DateTime now = DateTime.UtcNow;
+        counts.Add(new("tokens", await db.PersonalAccessTokens.Where(t => t.AccountId == source.Id && t.RevokedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, now).SetProperty(t => t.RevokedBy, actorId), ct)));
+        await db.PersonalAccessTokens.Where(t => t.CreatedBy == source.Id).ExecuteUpdateAsync(s => s.SetProperty(t => t.CreatedBy, survivor.Id), ct);
+        await db.PersonalAccessTokens.Where(t => t.RevokedBy == source.Id).ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedBy, survivor.Id), ct);
+        await db.AccountEmails.Where(e => e.AddedBy == source.Id).ExecuteUpdateAsync(s => s.SetProperty(e => e.AddedBy, survivor.Id), ct);
         return counts;
     }
 
@@ -439,7 +448,9 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
         int grants = await db.RoleGrants.CountAsync(g => g.PrincipalType == PrincipalType.Account && g.PrincipalId == source.Id, ct);
         int memberships = await db.Memberships.CountAsync(m => m.MemberType == MemberType.Account && m.MemberId == source.Id && m.Source == MembershipSource.Manual, ct);
         Dictionary<Guid, HashSet<string>> addresses = await Addresses.OfAsync(db, [source.Id, survivor.Id], ct);
-        return [new("grants", grants), new("memberships", memberships), new("addresses", addresses[source.Id].Except(addresses[survivor.Id]).Count())];
+        DateTime now = DateTime.UtcNow;
+        int tokens = await db.PersonalAccessTokens.CountAsync(t => t.AccountId == source.Id && t.RevokedAt == null && t.ExpiresAt > now, ct);
+        return [new("grants", grants), new("memberships", memberships), new("addresses", addresses[source.Id].Except(addresses[survivor.Id]).Count()), new("tokens", tokens)];
     }
 
     private static async Task<List<AccountMergeDto>> DtosAsync(GuardDbContext db, List<AccountMergeRecord> records, CancellationToken ct)
@@ -471,22 +482,91 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
     private static DateTime Max(DateTime a, DateTime b) => a > b ? a : b;
 }
 
-/// <summary>Platform's rows that name an account (ADR 0044): mail logged to or from it, and the texts and templates it last changed.</summary>
+/// <summary>
+/// Platform's rows that name an account (ADR 0044): mail logged to it, the texts and templates it last changed, and since
+/// M7 and M8 its notices and notification choices, its channel addresses and git accounts, and what it ran or set up
+/// (AI and tool calls, scripts, skills, smart commits, jobs, backfills, connections, channels, repositories). Where both
+/// accounts have one of something there can be one of (a notice of an event, choices, an address on a channel), the
+/// survivor's stays.
+/// </summary>
 internal static class PlatformMerge
 {
-    public static async Task<IReadOnlyList<AccountMergeCount>> MoveAsync(GuardDbContext db, Guid source, Guid survivor, CancellationToken ct) =>
+    /// <summary>Columns naming who ran or set something up: moved as they are.</summary>
+    private static readonly (string Table, string Column)[] Activity =
     [
-        new("mail", await db.Database.ExecuteSqlInterpolatedAsync($"""UPDATE platform.mail_log SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct)),
-        new("texts", await db.Database.ExecuteSqlInterpolatedAsync($"""UPDATE platform.text_overrides SET "UpdatedBy" = {survivor} WHERE "UpdatedBy" = {source}""", ct)
-            + await db.Database.ExecuteSqlInterpolatedAsync($"""UPDATE platform.message_templates SET "UpdatedBy" = {survivor} WHERE "UpdatedBy" = {source}""", ct)),
+        ("ai_usage", "AccountId"),
+        ("outside_tool_calls", "AccountId"),
+        ("script_runs", "AccountId"),
+        ("skill_runs", "AccountId"),
+        ("smart_commit_runs", "AccountId"),
+        ("jobs", "StartedBy"),
+        ("repository_backfills", "StartedBy"),
+        ("connections", "CreatedBy"),
+        ("channel_targets", "CreatedBy"),
+        ("repositories", "CreatedBy"),
+        ("repository_links", "LinkedBy"),
     ];
 
-    public static async Task<IReadOnlyList<AccountMergeCount>> CountAsync(GuardDbContext db, Guid source, CancellationToken ct) =>
-    [
-        new("mail", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.mail_log WHERE "AccountId" = {source}""", ct)),
-        new("texts", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.text_overrides WHERE "UpdatedBy" = {source}""", ct)
-            + await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.message_templates WHERE "UpdatedBy" = {source}""", ct)),
-    ];
+    public static async Task<IReadOnlyList<AccountMergeCount>> MoveAsync(GuardDbContext db, Guid source, Guid survivor, CancellationToken ct)
+    {
+        int notices = await Run(db, $"""
+            DELETE FROM platform.notices x WHERE x."AccountId" = {source}
+            AND EXISTS (SELECT 1 FROM platform.notices o WHERE o."EventId" = x."EventId" AND o."AccountId" = {survivor})
+            """, ct);
+        notices += await Run(db, $"""UPDATE platform.notices SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct);
+        await Run(db, $"""UPDATE platform.notices SET "ActorId" = {survivor} WHERE "ActorId" = {source}""", ct);
+
+        int settings = await Run(db, $"""
+            DELETE FROM platform.notification_settings x WHERE x."AccountId" = {source}
+            AND EXISTS (SELECT 1 FROM platform.notification_settings o WHERE o."AccountId" = {survivor})
+            """, ct);
+        settings += await Run(db, $"""UPDATE platform.notification_settings SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct);
+        settings += await Run(db, $"""
+            DELETE FROM platform.channel_addresses x WHERE x."AccountId" = {source}
+            AND EXISTS (SELECT 1 FROM platform.channel_addresses o WHERE o."Channel" = x."Channel" AND o."AccountId" = {survivor})
+            """, ct);
+        settings += await Run(db, $"""UPDATE platform.channel_addresses SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct);
+
+        int activity = 0;
+        foreach ((string table, string column) in Activity)
+        {
+            activity += await db.Database.ExecuteSqlRawAsync($"""UPDATE platform.{table} SET "{column}" = @p0 WHERE "{column}" = @p1""", [survivor, source], ct);
+        }
+
+        return
+        [
+            new("mail", await Run(db, $"""UPDATE platform.mail_log SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct)),
+            new("texts", await Run(db, $"""UPDATE platform.text_overrides SET "UpdatedBy" = {survivor} WHERE "UpdatedBy" = {source}""", ct)
+                + await Run(db, $"""UPDATE platform.message_templates SET "UpdatedBy" = {survivor} WHERE "UpdatedBy" = {source}""", ct)),
+            new("notices", notices),
+            new("settings", settings),
+            new("git", await Run(db, $"""UPDATE platform.git_accounts SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct)),
+            new("activity", activity),
+        ];
+    }
+
+    public static async Task<IReadOnlyList<AccountMergeCount>> CountAsync(GuardDbContext db, Guid source, CancellationToken ct)
+    {
+        int activity = 0;
+        foreach ((string table, string column) in Activity)
+        {
+            activity += await db.Database.SqlQueryRaw<int>($"""SELECT count(*)::int AS "Value" FROM platform.{table} WHERE "{column}" = @p0""", source).SingleAsync(ct);
+        }
+
+        return
+        [
+            new("mail", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.mail_log WHERE "AccountId" = {source}""", ct)),
+            new("texts", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.text_overrides WHERE "UpdatedBy" = {source}""", ct)
+                + await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.message_templates WHERE "UpdatedBy" = {source}""", ct)),
+            new("notices", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.notices WHERE "AccountId" = {source}""", ct)),
+            new("settings", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.notification_settings WHERE "AccountId" = {source}""", ct)
+                + await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.channel_addresses WHERE "AccountId" = {source}""", ct)),
+            new("git", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.git_accounts WHERE "AccountId" = {source}""", ct)),
+            new("activity", activity),
+        ];
+    }
+
+    private static Task<int> Run(GuardDbContext db, FormattableString sql, CancellationToken ct) => db.Database.ExecuteSqlInterpolatedAsync(sql, ct);
 
     private static Task<int> Count(GuardDbContext db, FormattableString sql, CancellationToken ct) => db.Database.SqlQuery<int>(sql).SingleAsync(ct);
 }
