@@ -1,9 +1,9 @@
-using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Data;
 using Toda.Guard.Directories;
 using Toda.Guard.Domain;
+using Toda.Platform.Limits;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
@@ -13,43 +13,25 @@ public class LoginRateLimiter : ISingletonDependency
 {
     private const int MaxFailures = 5;
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(15);
-    private readonly ConcurrentDictionary<string, List<DateTime>> _failures = new();
+    private readonly SlidingWindows _failures = new();
 
-    public bool IsBlocked(string username, string? ip) => Count($"u:{username}") >= MaxFailures || (ip is not null && Count($"ip:{ip}") >= MaxFailures * 4);
+    public bool IsBlocked(string username, string? ip)
+    {
+        DateTime now = DateTime.UtcNow;
+        return _failures.Count($"u:{username}", Window, now) >= MaxFailures || (ip is not null && _failures.Count($"ip:{ip}", Window, now) >= MaxFailures * 4);
+    }
 
     public void RecordFailure(string username, string? ip)
     {
-        Add($"u:{username}");
+        DateTime now = DateTime.UtcNow;
+        _failures.Add($"u:{username}", now);
         if (ip is not null)
         {
-            Add($"ip:{ip}");
+            _failures.Add($"ip:{ip}", now);
         }
     }
 
-    public void Reset(string username) => _failures.TryRemove($"u:{username}", out _);
-
-    private int Count(string key)
-    {
-        if (!_failures.TryGetValue(key, out List<DateTime>? list))
-        {
-            return 0;
-        }
-
-        lock (list)
-        {
-            list.RemoveAll(t => t < DateTime.UtcNow - Window);
-            return list.Count;
-        }
-    }
-
-    private void Add(string key)
-    {
-        List<DateTime> list = _failures.GetOrAdd(key, _ => []);
-        lock (list)
-        {
-            list.Add(DateTime.UtcNow);
-        }
-    }
+    public void Reset(string username) => _failures.Reset($"u:{username}");
 }
 
 /// <summary>Credential check only. Tokens are issued by the OpenIddict token endpoint (ADR 0007).</summary>

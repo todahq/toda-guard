@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.DataProtection;
@@ -6,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
+using Toda.Platform.Limits;
 using Toda.Sdk;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
@@ -394,28 +394,13 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
 /// </summary>
 public class SelfServiceLimiter : ISingletonDependency
 {
-    private readonly ConcurrentDictionary<string, List<DateTime>> _hits = new();
+    private readonly SlidingWindows _hits = new();
 
     public bool Allow(string action, string? ip, string? email)
     {
         DateTime now = DateTime.UtcNow;
-        return Take($"{action}|ip|{ip}", 10, TimeSpan.FromMinutes(15), now)
-            & (email is null || Take($"{action}|mail|{GuardConstants.Normalize(email)}", 3, TimeSpan.FromHours(1), now));
-    }
-
-    private bool Take(string key, int max, TimeSpan window, DateTime now)
-    {
-        List<DateTime> hits = _hits.GetOrAdd(key, _ => []);
-        lock (hits)
-        {
-            hits.RemoveAll(t => now - t > window);
-            if (hits.Count >= max)
-            {
-                return false;
-            }
-
-            hits.Add(now);
-            return true;
-        }
+        bool byAddress = _hits.TryTake($"{action}|ip|{ip}", 10, TimeSpan.FromMinutes(15), now);
+        bool byEmail = email is null || _hits.TryTake($"{action}|mail|{GuardConstants.Normalize(email)}", 3, TimeSpan.FromHours(1), now);
+        return byAddress && byEmail;
     }
 }

@@ -207,7 +207,7 @@ public class DirectorySyncService(
         }
 
         // Synced groups that vanished from the source are removed with their memberships; local groups stay.
-        List<Group> vanished = existing.Where(g => !g.IsLocal && !recordToGroup.Values.Contains(g)).ToList();
+        List<Group> vanished = existing.Where(g => !g.IsLocal && !recordToGroup.ContainsValue(g)).ToList();
         List<Guid> vanishedIds = vanished.Select(g => g.Id).ToList();
         if (vanishedIds.Count > 0)
         {

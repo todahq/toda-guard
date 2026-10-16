@@ -55,6 +55,7 @@ public class RolesController(GuardDb guardDb, RoleCatalog roleCatalog, SecurityL
     /// <summary>Checks a rule before saving: subjects, fields, condition paths and operators. Placeholders are allowed.</summary>
     [HttpPost("validate-rule")]
     [Reads]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "An action: MVC routes instance methods only.")]
     public object Validate([FromBody] ValidateInput input)
     {
         try

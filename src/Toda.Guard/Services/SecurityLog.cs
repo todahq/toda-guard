@@ -64,7 +64,7 @@ public class SecurityLog(GuardDb guardDb, ActingContext acting) : ITransientDepe
     /// <summary>A query's results downloaded as a file (ADR 0043).</summary>
     public const string QueryExport = SecurityAuditTypes.QueryExport;
 
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = JsonSerializerOptions.Web;
 
     public Task WriteAsync(string type, string? username, Guid? accountId, string? detail, string? ip, CancellationToken cancellationToken = default) =>
         guardDb.RunAsync(async db =>
