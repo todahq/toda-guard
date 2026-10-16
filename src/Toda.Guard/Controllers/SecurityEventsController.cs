@@ -6,6 +6,7 @@ using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
 using Toda.Platform.Controllers;
+using Toda.Sdk;
 using Volo.Abp;
 
 namespace Toda.Guard.Controllers;
@@ -54,7 +55,7 @@ public class SecurityEventsController(GuardDb guardDb, IEnumerable<IGrantScopeDe
 
             if (!string.IsNullOrWhiteSpace(q))
             {
-                string like = $"%{q.Trim().Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_")}%";
+                string like = SqlLike.Containing(q.Trim());
                 events = events.Where(e => EF.Functions.ILike(e.Username ?? "", like) || EF.Functions.ILike(e.TargetName ?? "", like)
                     || EF.Functions.ILike(e.Detail ?? "", like) || EF.Functions.ILike(e.Ip ?? "", like));
             }

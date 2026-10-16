@@ -26,10 +26,13 @@ public static class Addresses
     }
 
     /// <summary>Accounts (not merged) with this address, the directory's or a verified one of their own, in any state.</summary>
-    public static IQueryable<Account> WithAddress(GuardDbContext db, string normalized) =>
-        db.Accounts.Where(a => a.MergedIntoId == null
-            && ((a.Email != null && a.Email.ToLower() == normalized)
+    public static IQueryable<Account> WithAddress(GuardDbContext db, string normalized)
+    {
+        string pattern = SqlLike.Exactly(normalized);
+        return db.Accounts.Where(a => a.MergedIntoId == null
+            && ((a.Email != null && EF.Functions.ILike(a.Email, pattern))
                 || db.AccountEmails.Any(e => e.AccountId == a.Id && e.VerifiedAt != null && e.NormalizedEmail == normalized)));
+    }
 
     /// <summary>The active accounts with this address.</summary>
     public static IQueryable<Account> ActiveWithAddress(GuardDbContext db, string normalized) =>

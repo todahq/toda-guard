@@ -5,6 +5,7 @@ using Toda.Guard.Domain;
 using Toda.Guard.Services;
 using Toda.Platform.Acting;
 using Casl;
+using Toda.Sdk;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities;
 
@@ -31,8 +32,8 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
             IQueryable<Account> query = db.Accounts.AsNoTracking().AccessibleBy(ability, "read"); // filtered in SQL
             if (!string.IsNullOrWhiteSpace(search))
             {
-                string s = GuardConstants.Normalize(search);
-                query = query.Where(a => a.NormalizedUsername.Contains(s) || a.DisplayName.ToLower().Contains(s) || (a.Email != null && a.Email.ToLower().Contains(s)));
+                string s = GuardConstants.Normalize(search), like = SqlLike.Containing(s);
+                query = query.Where(a => a.NormalizedUsername.Contains(s) || EF.Functions.ILike(a.DisplayName, like) || (a.Email != null && EF.Functions.ILike(a.Email, like)));
             }
 
             if (Enum.TryParse(status, ignoreCase: true, out AccountStatus parsed))

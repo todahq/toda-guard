@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Directories;
 using Toda.Guard.Domain;
 using Toda.Platform.Plugins;
+using Toda.Sdk;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
@@ -51,9 +52,9 @@ public class AccountLookup(GuardDb guardDb) : IAccountLookup, ITransientDependen
 
     public Task<IReadOnlyList<AccountInfo>> SearchAsync(string text, int max = 20, CancellationToken cancellationToken = default)
     {
-        string normalized = GuardConstants.Normalize(text);
+        string normalized = GuardConstants.Normalize(text), like = SqlLike.Containing(normalized);
         return guardDb.RunAsync<IReadOnlyList<AccountInfo>>(async db => (await db.Accounts.AsNoTracking()
-                .Where(a => a.NormalizedUsername.Contains(normalized) || a.DisplayName.ToLower().Contains(normalized))
+                .Where(a => a.NormalizedUsername.Contains(normalized) || EF.Functions.ILike(a.DisplayName, like))
                 .OrderBy(a => a.Username)
                 .Take(max)
                 .ToListAsync(cancellationToken))
