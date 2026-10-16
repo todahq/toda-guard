@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Casl;
 using Toda.Query;
+using Toda.Sdk;
 
 namespace Toda.Guard;
 
@@ -80,10 +81,13 @@ public interface IRoleRules
     IReadOnlyList<string> Problems(JsonObject rule);
 }
 
-public static class RoleKeys
+public static partial class RoleKeys
 {
     /// <summary>What a role's key looks like: lowercase, a letter first, 2 to 64 characters.</summary>
-    public static readonly Regex Pattern = new("^[a-z][a-z0-9-]{1,63}$");
+    public static readonly Regex Pattern = Format();
+
+    [GeneratedRegex("^[a-z][a-z0-9-]{1,63}$", RegexOptions.None, TextPatterns.TimeoutMilliseconds)]
+    private static partial Regex Format();
 }
 
 /// <summary>Accounts for customers who write in (ADR 0039): mail and confirmed portal requests.</summary>

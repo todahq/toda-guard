@@ -90,9 +90,9 @@ public class ServiceAccountsController(GuardDb guardDb, AccountProjector project
     public async Task<ServiceAccountDto> Create([FromBody] CreateServiceAccountInput input, CancellationToken cancellationToken)
     {
         string username = (input.Username ?? "").Trim();
-        if (!System.Text.RegularExpressions.Regex.IsMatch(username, @"^[A-Za-z0-9._@-]{2,64}$"))
+        if (!Usernames.Pattern().IsMatch(username))
         {
-            throw new UserFriendlyException("Usernames are 2–64 letters, digits, dots, dashes, underscores or @.");
+            throw new UserFriendlyException(Usernames.Rule);
         }
 
         string normalized = GuardConstants.Normalize(username);

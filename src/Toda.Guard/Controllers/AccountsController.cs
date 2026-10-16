@@ -85,9 +85,9 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     public async Task<AccountDto> Create([FromBody] CreateAccountInput input, CancellationToken cancellationToken)
     {
         Ensure(await AbilityAsync(cancellationToken), "create", "Account");
-        if (string.IsNullOrWhiteSpace(input.Username) || !System.Text.RegularExpressions.Regex.IsMatch(input.Username.Trim(), @"^[A-Za-z0-9._@-]{2,64}$"))
+        if (string.IsNullOrWhiteSpace(input.Username) || !Usernames.Pattern().IsMatch(input.Username.Trim()))
         {
-            throw new UserFriendlyException("Usernames are 2–64 letters, digits, dots, dashes, underscores or @.");
+            throw new UserFriendlyException(Usernames.Rule);
         }
 
         if (string.IsNullOrEmpty(input.Password) || input.Password.Length < 10)
