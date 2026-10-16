@@ -530,7 +530,9 @@ internal static class PlatformMerge
         int activity = 0;
         foreach ((string table, string column) in Activity)
         {
+#pragma warning disable S2077, EF1002 // the table and column come from the list above, not a request; the values are parameters
             activity += await db.Database.ExecuteSqlRawAsync($"""UPDATE platform.{table} SET "{column}" = @p0 WHERE "{column}" = @p1""", [survivor, source], ct);
+#pragma warning restore S2077, EF1002
         }
 
         return
@@ -550,7 +552,9 @@ internal static class PlatformMerge
         int activity = 0;
         foreach ((string table, string column) in Activity)
         {
+#pragma warning disable S2077, EF1002 // the table and column come from the list above, not a request; the values are parameters
             activity += await db.Database.SqlQueryRaw<int>($"""SELECT count(*)::int AS "Value" FROM platform.{table} WHERE "{column}" = @p0""", source).SingleAsync(ct);
+#pragma warning restore S2077, EF1002
         }
 
         return
