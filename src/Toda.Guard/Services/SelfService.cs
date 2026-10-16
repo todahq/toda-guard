@@ -304,7 +304,8 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
     /// <summary>Mails a reset link to each active account Toda keeps with this email; nothing for anyone else, and says nothing either way.</summary>
     public async Task ForgotAsync(string email, CancellationToken ct)
     {
-        string normalized = GuardConstants.Normalize(email ?? "");
+        string address = (email ?? "").Trim();
+        string normalized = GuardConstants.Normalize(address);
         if (normalized.Length is 0 or > 254)
         {
             return;
@@ -324,7 +325,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
             string token = Resetter.Protect($"{user.Id:N}:{Stamp(user)}", ResetFor);
             await SendAsync(SelfServiceMail.Reset, user,
                 new Dictionary<string, object?> { ["username"] = user.Username, ["link"] = $"{Site}/reset-password#token={token}", ["minutes"] = (int)ResetFor.TotalMinutes }, ct,
-                to: email.Trim()); // the address asked for: the directory's or one the account verified (ADR 0044)
+                to: address); // the address asked for: the directory's or one the account verified (ADR 0044)
         }
     }
 

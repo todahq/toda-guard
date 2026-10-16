@@ -225,7 +225,7 @@ public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGra
 public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder, PersonalTokens tokens)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
-    public const string Scheme = "TodaToken";
+    public const string SchemeName = "TodaToken";
 
     /// <summary>Whether a request's bearer token is a personal access token (it goes to this handler, not to OpenIddict).</summary>
     public static bool Carries(Microsoft.AspNetCore.Http.HttpRequest request) =>
@@ -244,7 +244,7 @@ public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOpt
             return AuthenticateResult.Fail("The token is unknown, revoked or expired, or its account isn't active.");
         }
 
-        ClaimsIdentity identity = new(Scheme, "name", "role");
+        ClaimsIdentity identity = new(SchemeName, "name", "role");
         identity.AddClaim(new Claim("sub", found.Account.Id.ToString()));
         identity.AddClaim(new Claim("name", found.Account.Username));
         identity.AddClaim(new Claim("display_name", found.Account.DisplayName));
@@ -260,7 +260,7 @@ public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOpt
             identity.AddClaim(new Claim(ActingContext.TokenProjectClaim, project.ToString()));
         }
 
-        return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme));
+        return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
     }
 }
 

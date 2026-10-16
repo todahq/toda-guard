@@ -113,8 +113,8 @@ public class TodaGuardModule : AbpModule
         // A bearer token is either an access token from the token endpoint (OpenIddict) or a personal access token (M7).
         context.Services.AddAuthentication(TodaBearer)
             .AddPolicyScheme(TodaBearer, null, options => options.ForwardDefaultSelector = http =>
-                PersonalTokenHandler.Carries(http.Request) ? PersonalTokenHandler.Scheme : OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
-            .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, PersonalTokenHandler>(PersonalTokenHandler.Scheme, null);
+                PersonalTokenHandler.Carries(http.Request) ? PersonalTokenHandler.SchemeName : OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
+            .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, PersonalTokenHandler>(PersonalTokenHandler.SchemeName, null);
 
         context.Services.AddAuthorization(options =>
             options.AddPolicy(TodaPolicies.Admin, policy => policy.RequireAuthenticatedUser().AddRequirements(new TodaAdminRequirement())));

@@ -162,7 +162,7 @@ public static class AbilityRules
         return actions.Count == 0 ? null : Copy(rule, actions, rule.Subject);
     }
 
-    public static RawRule Copy(RawRule rule, IReadOnlyList<string> actions, IReadOnlyList<string> subjects) => new()
+    public static RawRule Copy(RawRule rule, IReadOnlyList<string> actions, IReadOnlyList<string>? subjects) => new()
     {
         Action = actions,
         Subject = subjects,

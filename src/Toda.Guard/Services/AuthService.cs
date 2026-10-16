@@ -59,7 +59,7 @@ public class AuthService(
             return new LoginResult(false, null, "too_many_attempts");
         }
 
-        (bool ok, Account? account, string reason) = await guardDb.RunAsync(async db =>
+        (bool ok, Account? account, string reason) = await guardDb.RunAsync<(bool, Account?, string)>(async db =>
         {
             Account? account = await db.Accounts.FirstOrDefaultAsync(a => a.NormalizedUsername == normalized, cancellationToken);
             if (account is null)
