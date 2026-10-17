@@ -121,6 +121,26 @@ public interface IOrganizationImport
     Task<Guid> EnsureAsync(Guid? known, string name, IReadOnlyCollection<Guid> members, CancellationToken cancellationToken);
 }
 
+/// <summary>A group an import uses (ADR 0059): its id and name, and whether the import made it (and keeps its members).</summary>
+public sealed record ImportedGroup(Guid Id, string Name, bool Imported);
+
+/// <summary>
+/// Groups from an import (ADR 0059): the group the import made before for this source and name, else the only group in
+/// Toda with that name (a directory's, used as it is), else a new group in the internal directory with the source's
+/// members, which later runs keep up to date.
+/// </summary>
+public interface IGroupImport
+{
+    /// <summary>The group a source's group is, without making one: null when the import would make it.</summary>
+    Task<ImportedGroup?> FindAsync(string source, string name, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The group, made if needed. An imported group's members become exactly these (members an admin added by hand
+    /// stay); a group the import didn't make is left as it is.
+    /// </summary>
+    Task<ImportedGroup> EnsureAsync(string source, string name, IReadOnlyCollection<Guid> members, CancellationToken cancellationToken = default);
+}
+
 public static class EmailDomains
 {
     /// <summary>An address's domain, lowercase, or null when it has none.</summary>

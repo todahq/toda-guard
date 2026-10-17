@@ -243,6 +243,9 @@ public enum MembershipSource
 
     /// <summary>An organization's member because their email is in one of its domains; Toda adds and removes these.</summary>
     Domain,
+
+    /// <summary>A member of a group an import made (ADR 0059), as the source has it; only later runs add or remove these.</summary>
+    Import,
 }
 
 /// <summary>One row of the membership ledger: a member of a group, and who asserted it.</summary>
