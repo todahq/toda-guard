@@ -116,8 +116,8 @@ public class TodaGuardModule : AbpModule
                 PersonalTokenHandler.Carries(http.Request) ? PersonalTokenHandler.SchemeName : OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
             .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, PersonalTokenHandler>(PersonalTokenHandler.SchemeName, null);
 
-        context.Services.AddAuthorization(options =>
-            options.AddPolicy(TodaPolicies.Admin, policy => policy.RequireAuthenticatedUser().AddRequirements(new TodaAdminRequirement())));
+        context.Services.AddAuthorizationBuilder()
+            .AddPolicy(TodaPolicies.Admin, policy => policy.RequireAuthenticatedUser().AddRequirements(new TodaAdminRequirement()));
         context.Services.AddTransient<IAuthorizationHandler, TodaAdminHandler>();
 
         context.Services.AddHostedService<DirectorySyncScheduler>();
