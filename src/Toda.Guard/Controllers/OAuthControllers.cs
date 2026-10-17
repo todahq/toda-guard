@@ -36,7 +36,11 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb) : GuardCon
     [HttpGet("~/connect/authorize")]
     [HttpPost("~/connect/authorize")]
     [AllowAnonymous]
+    // Reviewed (S4502): a decision is taken only from a POST, and the session that makes it someone's comes from the web
+    // app's SameSite=Lax cookie, which browsers don't send with another site's POST: that arrives signed out.
+#pragma warning disable S4502
     [IgnoreAntiforgeryToken]
+#pragma warning restore S4502
     public async Task<IActionResult> Authorize(CancellationToken cancellationToken)
     {
         OpenIddictRequest request = HttpContext.GetOpenIddictServerRequest()
@@ -121,7 +125,9 @@ public class ClientRegistrationController(OAuthApps apps, IConfiguration configu
 {
     [HttpPost("~/connect/register")]
     [AllowAnonymous]
+#pragma warning disable S4502 // reviewed: registration is anonymous, by machines (RFC 7591); no cookie acts for anyone here
     [IgnoreAntiforgeryToken]
+#pragma warning restore S4502
     public async Task<IActionResult> Register([FromBody] ClientRegistrationInput input, CancellationToken cancellationToken)
     {
         if (!configuration.GetValue("Guard:Oidc:ClientRegistration", true))

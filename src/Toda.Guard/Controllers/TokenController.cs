@@ -28,7 +28,9 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
 {
     [HttpPost("~/connect/token")]
     [AllowAnonymous]
+#pragma warning disable S4502 // reviewed: the token endpoint takes a client's grant (a code, a refresh token), never a cookie
     [IgnoreAntiforgeryToken]
+#pragma warning restore S4502
     [Produces("application/json")]
     public async Task<IActionResult> Exchange(CancellationToken cancellationToken)
     {
