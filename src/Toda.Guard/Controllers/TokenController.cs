@@ -190,4 +190,10 @@ public static class GuardOidc
 
     /// <summary>The first-party Next.js server (a confidential client).</summary>
     public const string WebClientId = "toda-web";
+
+    /// <summary>
+    /// The first-party mobile app (ADR 0062): a public client, since an app on a phone can't keep a secret; it signs in
+    /// with the person's password and keeps the session with refresh tokens, like the web, but can't ask for a step-up.
+    /// </summary>
+    public const string MobileClientId = "toda-mobile";
 }
