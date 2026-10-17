@@ -67,6 +67,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
             b.Property(x => x.Language).HasMaxLength(35);
             b.Property(x => x.TimeZone).HasMaxLength(64);
+            b.Property(x => x.Motion).HasMaxLength(16);
             b.Property(x => x.MailTo).HasMaxLength(320);
             b.Ignore(x => x.MailAddress);
             b.HasIndex(x => x.NormalizedUsername).IsUnique();

@@ -136,6 +136,9 @@ public class Account : Entity<Guid>
     /// <summary>The person's time zone (IANA or Windows id); null follows the site's.</summary>
     public string? TimeZone { get; set; }
 
+    /// <summary>How much the interface moves for the person (ADR 0058): "reduced" or "full"; null follows their system.</summary>
+    public string? Motion { get; set; }
+
     /// <summary>
     /// The account this one was merged into (ADR 0044): it stays inactive, keeps its username, and lookups follow this to
     /// the survivor. Null for everyone else.

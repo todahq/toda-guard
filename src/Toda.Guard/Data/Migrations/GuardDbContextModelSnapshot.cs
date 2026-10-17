@@ -67,6 +67,10 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<Guid?>("MergedIntoId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Motion")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<string>("NormalizedUsername")
                         .IsRequired()
                         .HasMaxLength(256)

@@ -9,11 +9,15 @@ namespace Toda.Guard.Controllers;
 
 /// <summary>
 /// The person's language and time zone; null follows the site's (ADR 0039). Weeks start on the site's first day for
-/// everyone (ADR 0013): sunday, monday…
+/// everyone (ADR 0013): sunday, monday… Motion is how much the interface moves for them (ADR 0058): system (as their
+/// device says), reduced or full.
 /// </summary>
-public sealed record PreferencesDto(string? Language, string? TimeZone, string SiteTimeZone, string FirstDayOfWeek);
+public sealed record PreferencesDto(string? Language, string? TimeZone, string SiteTimeZone, string FirstDayOfWeek, string Motion);
 
 public sealed record PreferencesInput(string? Language, string? TimeZone);
+
+/// <summary>system (or nothing), reduced or full.</summary>
+public sealed record MotionInput(string? Motion);
 
 [Route("api/guard")]
 public class AuthController(GuardDb guardDb, MembershipGraph graph, Toda.Platform.Localization.LocalizationCache localization,
@@ -48,7 +52,32 @@ public class AuthController(GuardDb guardDb, MembershipGraph graph, Toda.Platfor
     }
 
     private PreferencesDto Preferences(Account account) =>
-        new(account.Language, account.TimeZone, calendar.TimeZone, calendar.FirstDayOfWeek.ToString().ToLowerInvariant());
+        new(account.Language, account.TimeZone, calendar.TimeZone, calendar.FirstDayOfWeek.ToString().ToLowerInvariant(), account.Motion ?? "system");
+
+    /// <summary>
+    /// How much the interface moves for the person (ADR 0058): system follows their device's setting, reduced keeps
+    /// movement out, full plays it anyway. Its own call, so saving the language and time zone never touches it.
+    /// </summary>
+    [HttpPut("me/motion")]
+    [Authorize]
+    public async Task<PreferencesDto> SaveMotion([FromBody] MotionInput input, CancellationToken cancellationToken)
+    {
+        string? motion = input.Motion?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "system" => null,
+            "reduced" => "reduced",
+            "full" => "full",
+            var other => throw new Volo.Abp.UserFriendlyException($"Motion is system, reduced or full, not '{other}'."),
+        };
+
+        return await guardDb.RunAsync(async db =>
+        {
+            Account account = await db.Accounts.FirstAsync(a => a.Id == CurrentAccountId, cancellationToken);
+            account.Motion = motion;
+            await db.SaveChangesAsync(cancellationToken);
+            return Preferences(account);
+        }, requiresNew: true, cancellationToken: cancellationToken);
+    }
 
     [HttpGet("me")]
     [Authorize]
