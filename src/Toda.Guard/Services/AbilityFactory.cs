@@ -152,7 +152,7 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
 
     /// <summary>The ability the grants give, each grant in its own scope and in any scope a module widens it to.</summary>
     private async Task<Ability> BuildAsync(Data.GuardDbContext db, List<RoleGrant> grants, object user, Guid subject, CancellationToken cancellationToken,
-        IReadOnlySet<Guid>? allowOnly = null)
+        HashSet<Guid>? allowOnly = null)
     {
         List<Guid> roleIds = grants.Select(g => g.RoleId).Distinct().ToList();
         ILookup<Guid, string> ruleJson = (await db.RoleRules.AsNoTracking().Where(r => roleIds.Contains(r.RoleId)).OrderBy(r => r.Order).ToListAsync(cancellationToken))
