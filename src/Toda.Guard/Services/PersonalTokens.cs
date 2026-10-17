@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 using System.Text;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
@@ -29,7 +30,7 @@ public sealed record NewPersonalTokenDto(PersonalTokenDto Token, string Secret);
 /// A token to make: a name, read or write, the projects it's limited to (none for all), how many days it lives, and the
 /// tools an agent may use with it (none for all, M7).
 /// </summary>
-public sealed record CreatePersonalTokenInput(string Name, string Access, List<Guid>? ProjectIds, int Days, List<string>? Tools = null);
+public sealed record CreatePersonalTokenInput(string Name, string Access, List<Guid>? ProjectIds, [property: JsonRequired] int Days, List<string>? Tools = null);
 
 /// <summary>
 /// Personal access tokens (M7): made, listed, revoked, and found by their secret. A token is <c>toda_pat_</c> and 43

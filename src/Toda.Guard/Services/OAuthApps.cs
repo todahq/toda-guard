@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 using System.Text.Json;
 using Toda.Guard.Controllers;
 using Toda.Platform.Acting;
@@ -19,7 +20,7 @@ public sealed record OAuthAppDto(string ClientId, string Name, string Kind, bool
 public sealed record NewOAuthAppDto(OAuthAppDto App, string? Secret);
 
 /// <summary>An app to make: its name, where it may send people back to, and whether it keeps a secret (a server-side app).</summary>
-public sealed record CreateOAuthAppInput(string Name, List<string> RedirectUris, bool Confidential);
+public sealed record CreateOAuthAppInput(string Name, List<string> RedirectUris, [property: JsonRequired] bool Confidential);
 
 /// <summary>What a consent page shows about an app: its name, whether it registered itself, and where it sends people back.</summary>
 public sealed record OAuthClientDto(string ClientId, string Name, string Kind, List<string> RedirectHosts);

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Toda.Guard.Data;
@@ -20,7 +21,7 @@ public static class MergeReasons
     public const string AddressAdded = "address-added";
 }
 
-public sealed record MergeInput(Guid SurvivorId, string? Confirm = null);
+public sealed record MergeInput([property: JsonRequired] Guid SurvivorId, string? Confirm = null);
 
 public sealed record MergeCountDto(string Key, int Count, string? Label);
 

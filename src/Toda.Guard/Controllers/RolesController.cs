@@ -1,4 +1,5 @@
 using Toda.Platform.Acting;
+using System.Text.Json.Serialization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
@@ -24,7 +25,7 @@ public class RolesController(GuardDb guardDb, RoleCatalog roleCatalog, SecurityL
 
     public sealed record CreateRoleInput(string Key, string Name, string? Description, List<JsonObject> Rules);
 
-    public sealed record GrantInput(string PrincipalType, Guid PrincipalId, JsonObject? Scope, DateTime? ValidUntil);
+    public sealed record GrantInput(string PrincipalType, [property: JsonRequired] Guid PrincipalId, JsonObject? Scope, DateTime? ValidUntil);
 
     public sealed record ValidateInput(JsonObject Rule);
 

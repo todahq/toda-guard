@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,7 +21,7 @@ public sealed record SecuritySettingsDto(int RetentionDays, int MinRetentionDays
     int TokenMaxDays, int MinTokenMaxDays, int MaxTokenMaxDays);
 
 /// <summary>The settings to save; TokenMaxDays left out keeps what's saved.</summary>
-public sealed record SecuritySettingsInput(int RetentionDays, int StepUpMinutes, int? TokenMaxDays = null);
+public sealed record SecuritySettingsInput([property: JsonRequired] int RetentionDays, [property: JsonRequired] int StepUpMinutes, int? TokenMaxDays = null);
 
 /// <summary>
 /// Security settings, for site admins. Changing them is sensitive (a shorter retention removes older events, a longer

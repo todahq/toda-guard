@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 using System.Text;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +16,7 @@ namespace Toda.Guard.Services;
 /// <summary>Sign-up as the site has it: on or off, the directory accounts go to, and the email domains it takes.</summary>
 public sealed record SignUpSettingsDto(bool Enabled, Guid? DirectoryId, string? DirectoryName, List<string> EmailDomains);
 
-public sealed record SignUpSettingsInput(bool Enabled, Guid? DirectoryId, List<string>? EmailDomains);
+public sealed record SignUpSettingsInput([property: JsonRequired] bool Enabled, Guid? DirectoryId, List<string>? EmailDomains);
 
 /// <summary>What the sign-in page needs to know: whether people may sign up, and with which email domains.</summary>
 public sealed record SignUpInfoDto(bool Enabled, List<string> EmailDomains);

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -26,7 +27,7 @@ public class DirectoriesController(
 {
     public sealed record DirectoryTypeDto(string Type, string DisplayName, List<string> Capabilities, List<DirectorySettingDefinition> Settings, string? PluginKey);
 
-    public sealed record DirectoryInput(string Name, string Type, bool IsActive, bool AuthenticationEnabled, int? SyncIntervalMinutes, Dictionary<string, string>? Settings);
+    public sealed record DirectoryInput(string Name, string Type, [property: JsonRequired] bool IsActive, [property: JsonRequired] bool AuthenticationEnabled, int? SyncIntervalMinutes, Dictionary<string, string>? Settings);
 
     public sealed record ReorderInput(List<Guid> DirectoryIds);
 
