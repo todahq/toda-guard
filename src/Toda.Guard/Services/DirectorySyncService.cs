@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Toda.Guard.Data;
 using Toda.Guard.Directories;
 using Toda.Guard.Domain;
+using Toda.Platform.Jobs;
 using Toda.Sdk;
 using Volo.Abp.DependencyInjection;
 
@@ -21,6 +22,7 @@ public class DirectorySyncService(
     AccountProjector projector,
     IEventPublisher events,
     AccountMergeService merges,
+    ClusterLocks clusterLocks,
     ILogger<DirectorySyncService> logger) : ITransientDependency
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> Locks = new();
@@ -31,6 +33,8 @@ public class DirectorySyncService(
         await gate.WaitAsync(cancellationToken);
         try
         {
+            // And across servers (M10 step 2): a sync now waits for another server's sync of the same directory.
+            await using IAsyncDisposable held = await clusterLocks.TakeAsync($"directory-sync:{directoryId}", cancellationToken);
             return await SyncCoreAsync(directoryId, cancellationToken);
         }
         finally

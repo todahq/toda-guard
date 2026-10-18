@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
+using Toda.Platform.Jobs;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
@@ -111,7 +112,7 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
 }
 
 /// <summary>Runs each directory's sync on its interval.</summary>
-public class DirectorySyncScheduler(IServiceScopeFactory scopes, ILogger<DirectorySyncScheduler> logger) : BackgroundService
+public class DirectorySyncScheduler(IServiceScopeFactory scopes, ClusterLocks locks, ILogger<DirectorySyncScheduler> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -121,6 +122,13 @@ public class DirectorySyncScheduler(IServiceScopeFactory scopes, ILogger<Directo
         {
             try
             {
+                // One server schedules at a time (M10 step 2), so a directory that's due is synced once, not by each.
+                await using IAsyncDisposable? held = await locks.TryTakeAsync("directory-sync-schedule", stoppingToken);
+                if (held is null)
+                {
+                    continue;
+                }
+
                 await using AsyncServiceScope scope = scopes.CreateAsyncScope();
                 GuardDb guardDb = scope.ServiceProvider.GetRequiredService<GuardDb>();
                 DateTime now = DateTime.UtcNow;
