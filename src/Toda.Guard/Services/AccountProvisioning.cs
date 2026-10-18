@@ -39,6 +39,19 @@ public class AccountProvisioning(GuardDb guardDb, AccountProjector projector) : 
                 {
                     return new ProvisionedAccount(byEmail[0], "email");
                 }
+
+                // The address on someone and on placeholders an import made of them (by another name: a site's user key, a
+                // Cloud account id): the one account that isn't an import's placeholder is the person (M9 step 7).
+                if (byEmail.Count > 1)
+                {
+                    List<Guid> imported = await db.Directories.AsNoTracking().Where(d => d.Type == ImportedType).Select(d => d.Id).ToListAsync(cancellationToken);
+                    List<Guid> people = await Addresses.WithAddress(db, lower).AsNoTracking().Where(a => !imported.Contains(a.DirectoryId))
+                        .Select(a => a.Id).Take(2).ToListAsync(cancellationToken);
+                    if (people.Count == 1)
+                    {
+                        return new ProvisionedAccount(people[0], "email");
+                    }
+                }
             }
 
             Guid directoryId = DirectoryIdFor(source);
