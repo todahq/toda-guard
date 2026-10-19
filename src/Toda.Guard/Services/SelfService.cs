@@ -21,7 +21,8 @@ public sealed record SignUpSettingsInput([property: JsonRequired] bool Enabled, 
 /// <summary>What the sign-in page needs to know: whether people may sign up, and with which email domains.</summary>
 public sealed record SignUpInfoDto(bool Enabled, List<string> EmailDomains);
 
-public sealed record SignUpInput(string Email, string DisplayName, string Password);
+/// <summary>A sign-up: the email, a name and a password, and the answer to the site's CAPTCHA (M10 step 7).</summary>
+public sealed record SignUpInput(string Email, string DisplayName, string Password, string? Captcha = null);
 
 public sealed record TokenInput(string Token);
 

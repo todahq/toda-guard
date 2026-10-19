@@ -14,8 +14,16 @@ namespace Toda.Guard.Controllers;
 /// on its own: [AllowAnonymous] on a controller would override any admin policy on its actions.
 /// </summary>
 [Route("api/guard")]
-public class SelfServiceController(SelfService self, SelfServiceLimiter limiter) : GuardControllerBase
+public class SelfServiceController(SelfService self, SelfServiceLimiter limiter, Toda.Platform.Security.Captchas captchas) : GuardControllerBase
 {
+    /// <summary>
+    /// A CAPTCHA for a sign-up (M10 step 7): a plugin's, or Toda's own proof of work, fresh each time it's asked for, as an
+    /// answer counts once. Null when the site has none.
+    /// </summary>
+    [AllowAnonymous]
+    [HttpGet("signup/captcha")]
+    public Task<Toda.Sdk.CaptchaChallenge?> Captcha(CancellationToken cancellationToken) => captchas.ChallengeAsync(cancellationToken);
+
     /// <summary>Whether people may sign up here, and with which email domains (all when empty).</summary>
     [AllowAnonymous]
     [HttpGet("signup")]
@@ -27,6 +35,11 @@ public class SelfServiceController(SelfService self, SelfServiceLimiter limiter)
     public async Task<NoContentResult> SignUp([FromBody] SignUpInput input, CancellationToken cancellationToken)
     {
         Limit("signup", input.Email);
+        if (!await captchas.VerifyAsync(input.Captcha, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken))
+        {
+            throw new UserFriendlyException("Answer the question that shows you're a person.");
+        }
+
         await self.SignUpAsync(input, cancellationToken);
         return NoContent();
     }
