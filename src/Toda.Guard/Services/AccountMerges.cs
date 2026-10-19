@@ -506,6 +506,7 @@ internal static class PlatformMerge
         ("channel_targets", "CreatedBy"),
         ("repositories", "CreatedBy"),
         ("repository_links", "LinkedBy"),
+        ("plugin_publishers", "AddedBy"),
     ];
 
     public static async Task<IReadOnlyList<AccountMergeCount>> MoveAsync(GuardDbContext db, Guid source, Guid survivor, CancellationToken ct)
