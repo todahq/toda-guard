@@ -95,6 +95,12 @@ public interface ICustomerAccounts
 {
     /// <summary>The account for an address that has been confirmed, made if there's none; null when it can't be.</summary>
     Task<Guid?> AccountForConfirmedEmailAsync(string email, string name, CancellationToken ct);
+
+    /// <summary>
+    /// The one active account an address belongs to, or null; never makes one. Mail only claims an address, so a message
+    /// finds its sender this way (M10 step 7), where a portal request, confirmed by its link, may make an account.
+    /// </summary>
+    Task<Guid?> AccountWithAddressAsync(string email, CancellationToken ct);
 }
 
 /// <summary>A person's clock for queries (ADR 0013): now, their time zone, and the site's first day of the week.</summary>

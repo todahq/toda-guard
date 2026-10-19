@@ -252,6 +252,13 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
     /// with it, else a new one where sign-up allows that address (active: the confirmation verified it; no password until
     /// they set one with a reset), else none.
     /// </summary>
+    public Task<Guid?> AccountWithAddressAsync(string email, CancellationToken ct) =>
+        guardDb.RunAsync(async db =>
+        {
+            List<Guid> owners = await Addresses.ActiveWithAddress(db, GuardConstants.Normalize(email)).Select(a => a.Id).Take(2).ToListAsync(ct);
+            return owners.Count == 1 ? owners[0] : (Guid?)null;
+        }, cancellationToken: ct);
+
     public async Task<Guid?> AccountForConfirmedEmailAsync(string email, string name, CancellationToken ct)
     {
         string normalized = GuardConstants.Normalize(email);
