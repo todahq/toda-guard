@@ -14,8 +14,14 @@ namespace Toda.Guard.Controllers;
 /// on its own: [AllowAnonymous] on a controller would override any admin policy on its actions.
 /// </summary>
 [Route("api/guard")]
-public class SelfServiceController(SelfService self, SelfServiceLimiter limiter, Toda.Platform.Security.Captchas captchas) : GuardControllerBase
+public class SelfServiceController(SelfService self, SelfServiceLimiter limiter, Toda.Platform.Security.Captchas captchas, TestAccounts testAccounts)
+    : GuardControllerBase
 {
+    /// <summary>The accounts a test site shows on its sign-in page, with their passwords; none on any other site.</summary>
+    [AllowAnonymous]
+    [HttpGet("signin/test-accounts")]
+    public IReadOnlyList<TestAccountDto> TestAccounts() => testAccounts.List();
+
     /// <summary>
     /// A CAPTCHA for a sign-up (M10 step 7): a plugin's, or Toda's own proof of work, fresh each time it's asked for, as an
     /// answer counts once. Null when the site has none.

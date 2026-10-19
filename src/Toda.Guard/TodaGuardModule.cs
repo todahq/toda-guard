@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Toda.Guard.Controllers;
 using OpenIddict.Abstractions;
@@ -143,6 +144,13 @@ public class TodaGuardModule : AbpModule
         templates.Register(SelfServiceMail.VerifyDefinition);
         templates.Register(SelfServiceMail.ResetDefinition);
         templates.Register(AddressMail.VerifyDefinition);
+
+        // A test site shows accounts' passwords on its sign-in page: said once at start, so a site people use doesn't by mistake.
+        if (context.ServiceProvider.GetRequiredService<TestAccounts>().List() is { Count: > 0 } shown)
+        {
+            context.ServiceProvider.GetRequiredService<ILogger<TodaGuardModule>>().LogWarning(
+                "The sign-in page shows {Count} test accounts with their passwords ({Section}): only for a test site", shown.Count, TestAccounts.Section);
+        }
     }
 }
 
