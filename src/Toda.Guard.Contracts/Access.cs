@@ -169,6 +169,17 @@ public static class AbilitySubjects
     public static AbilityOptions Options { get; } = new() { Semantics = RuleSemantics.DenyOverrides };
 }
 
+/// <summary>
+/// Denies a module adds to every ability guard builds (M9 step 6d): records a security level keeps from someone. Unlike
+/// a request's limits (ADR 0042) they hold for anyone's ability (a notice's recipient, a portal visitor), and they're
+/// kept with it under the permission stamp (ADR 0041), so what they read must move the stamp when it changes.
+/// </summary>
+public interface IAbilityDenies
+{
+    /// <summary>The account's denies (null: someone not signed in), knowing the groups it's in.</summary>
+    Task<IReadOnlyList<RawRule>> DeniesAsync(Guid? accountId, IReadOnlyCollection<Guid> groupIds, CancellationToken cancellationToken);
+}
+
 /// <summary>Rebuilding an ability from its own rules, narrowed: what the request limits (ADR 0042) are made of.</summary>
 public static class AbilityRules
 {

@@ -42,7 +42,7 @@ public static class GuardSubjects
 /// </summary>
 [ExposeServices(typeof(AbilityFactory), typeof(IAbilities))]
 public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<AbilityFactory> logger, IEnumerable<IGrantScopeExpander> expanders, AbilityCache kept,
-    ActingContext acting, IEnumerable<IAbilityLimit> limits)
+    ActingContext acting, IEnumerable<IAbilityLimit> limits, IEnumerable<IAbilityDenies> denies)
     : IScopedDependency, IAbilities
 {
     private readonly Dictionary<Guid, Ability> _cache = [];
@@ -78,12 +78,12 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
             return keptAbility;
         }
 
-        (Ability ability, DateTime? until) = await guardDb.RunAsync(async db =>
+        (Ability ability, DateTime? until, List<Guid>? groups) = await guardDb.RunAsync(async db =>
         {
             Account? account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId, cancellationToken);
             if (account is null || account.Status != AccountStatus.Active)
             {
-                return (None, (DateTime?)null);
+                return (None, (DateTime?)null, (List<Guid>?)null);
             }
 
             List<Guid> groupIds = (await graph.GetEffectiveGroupsAsync(db, account, cancellationToken)).Select(g => g.Group.Id).ToList();
@@ -100,8 +100,13 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
             HashSet<string?> ownScopes = grants.Where(g => g.PrincipalType != PrincipalType.Anonymous).Select(g => g.ScopeKey).ToHashSet();
             bool siteWide = ownScopes.Contains(null); // a site role (an administrator's) is theirs everywhere
             HashSet<Guid> allowOnly = grants.Where(g => g.PrincipalType == PrincipalType.Anonymous && (siteWide || ownScopes.Contains(g.ScopeKey))).Select(g => g.Id).ToHashSet();
-            return (await BuildAsync(db, grants, user, account.Id, cancellationToken, allowOnly), Until(grants));
+            return (await BuildAsync(db, grants, user, account.Id, cancellationToken, allowOnly), Until(grants), groupIds);
         }, cancellationToken: cancellationToken);
+
+        if (groups is not null)
+        {
+            ability = await WithDeniesAsync(ability, accountId, groups, cancellationToken);
+        }
 
         kept.Set(accountId, stamp, ability, until);
         return ability;
@@ -134,6 +139,11 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
             return (grants.Count == 0 ? None : await BuildAsync(db, grants, user, GuardConstants.AnonymousId, cancellationToken), Until(grants));
         }, cancellationToken: cancellationToken);
 
+        if (!ReferenceEquals(ability, None))
+        {
+            ability = await WithDeniesAsync(ability, null, [], cancellationToken);
+        }
+
         kept.Set(GuardConstants.AnonymousId, stamp, ability, until);
         _cache[GuardConstants.AnonymousId] = ability;
         return ability;
@@ -146,6 +156,18 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
     private Task<long> StampAsync(CancellationToken cancellationToken) =>
         guardDb.RunAsync(db => db.PermissionStamps.AsNoTracking().Where(s => s.Id == PermissionStamp.RowId).Select(s => s.Version).FirstOrDefaultAsync(cancellationToken),
             cancellationToken: cancellationToken);
+
+    /// <summary>The ability with every module's denies for this person (M9 step 6d), which any matching deny wins over.</summary>
+    private async Task<Ability> WithDeniesAsync(Ability ability, Guid? accountId, IReadOnlyCollection<Guid> groupIds, CancellationToken cancellationToken)
+    {
+        List<RawRule> added = [];
+        foreach (IAbilityDenies module in denies)
+        {
+            added.AddRange(await module.DeniesAsync(accountId, groupIds, cancellationToken));
+        }
+
+        return added.Count == 0 ? ability : AbilityRules.Rebuild(ability, rule => [rule], added);
+    }
 
     /// <summary>When an ability built from these grants stops being right on its own: the first "valid until" among them.</summary>
     private static DateTime? Until(List<RoleGrant> grants) => grants.Where(g => g.ValidUntil != null).Min(g => g.ValidUntil);
