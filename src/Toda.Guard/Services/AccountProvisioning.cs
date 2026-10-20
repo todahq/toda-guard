@@ -11,7 +11,7 @@ namespace Toda.Guard.Services;
 /// <summary>
 /// People from imports (ADR 0012): match by username, then by email; otherwise a deactivated placeholder in an
 /// "Imported from {source}" directory, with sign-in off, ranked after every other directory. And a development seeder's
-/// people (ADR 0068): active accounts in the internal directory, made as an admin makes one.
+/// people (ADR 0071): active accounts in the internal directory, made as an admin makes one.
 /// </summary>
 [ExposeServices(typeof(IAccountProvisioning))]
 public class AccountProvisioning(GuardDb guardDb, AccountProjector projector, IMembershipResolver membership, IEventPublisher events,

@@ -81,7 +81,7 @@ public interface IAccountProvisioning
     Task<ProvisionedAccount> MatchOrCreatePlaceholderAsync(string source, string username, string? displayName, string? email, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// An active person in Toda's internal directory, found by username or made (ADR 0068: the people a development
+    /// An active person in Toda's internal directory, found by username or made (ADR 0071: the people a development
     /// seeder fills a site with, who show as anyone does, not as an import's placeholders). They can sign in only when
     /// given a password, of at least 10 characters; one found keeps its own. Needs the caller to be a site admin.
     /// MatchedBy is "username" or "created".
