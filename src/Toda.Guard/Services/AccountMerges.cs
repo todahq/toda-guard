@@ -509,6 +509,7 @@ internal static class PlatformMerge
         ("plugin_publishers", "AddedBy"),
         ("backup_settings", "UpdatedBy"),
         ("backup_runs", "RequestedBy"),
+        ("backup_downloads", "RequestedBy"),
     ];
 
     public static async Task<IReadOnlyList<AccountMergeCount>> MoveAsync(GuardDbContext db, Guid source, Guid survivor, CancellationToken ct)
