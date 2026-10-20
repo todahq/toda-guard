@@ -2,17 +2,82 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Domain;
+using Toda.Platform.Acting;
+using Toda.Sdk;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
 
 /// <summary>
 /// People from imports (ADR 0012): match by username, then by email; otherwise a deactivated placeholder in an
-/// "Imported from {source}" directory, with sign-in off, ranked after every other directory.
+/// "Imported from {source}" directory, with sign-in off, ranked after every other directory. And a development seeder's
+/// people (ADR 0068): active accounts in the internal directory, made as an admin makes one.
 /// </summary>
 [ExposeServices(typeof(IAccountProvisioning))]
-public class AccountProvisioning(GuardDb guardDb, AccountProjector projector) : IAccountProvisioning, ITransientDependency
+public class AccountProvisioning(GuardDb guardDb, AccountProjector projector, IMembershipResolver membership, IEventPublisher events,
+    AccountMergeService merges, SecurityLog audit) : IAccountProvisioning, ITransientDependency
 {
+    public async Task<ProvisionedAccount> EnsureInternalAccountAsync(Guid callerId, string username, string displayName, string? email, string? password,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await membership.IsMemberAsync(callerId, GuardWellKnown.AdminsGroupId, cancellationToken))
+        {
+            throw new UnauthorizedAccessException("Only a site admin makes accounts this way.");
+        }
+
+        if (string.IsNullOrWhiteSpace(username) || !Usernames.Pattern().IsMatch(username.Trim()))
+        {
+            throw new ArgumentException(Usernames.Rule);
+        }
+
+        if (password is not null && password.Length < 10)
+        {
+            throw new ArgumentException("Passwords need at least 10 characters.");
+        }
+
+        string normalized = GuardConstants.Normalize(username);
+        (ProvisionedAccount account, List<object> made) = await guardDb.RunAsync(async db =>
+        {
+            Account? found = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.NormalizedUsername == normalized, cancellationToken);
+            if (found is not null)
+            {
+                return (new ProvisionedAccount(found.MergedIntoId ?? found.Id, "username"), new List<object>());
+            }
+
+            DirectoryUser user = new(Guid.NewGuid(), GuardConstants.InternalDirectoryId, $"internal:{normalized}", username.Trim())
+            {
+                DisplayName = string.IsNullOrWhiteSpace(displayName) ? username.Trim() : displayName.Trim(),
+                Email = email?.Trim(),
+            };
+            if (password is not null)
+            {
+                user.PasswordHash = AuthService.HashPassword(user, password);
+            }
+
+            db.DirectoryUsers.Add(user);
+            await db.SaveChangesAsync(cancellationToken);
+            List<object> events = await projector.RebuildAsync(db, [normalized], cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            await Organizations.ApplyDomainsAsync(db, cancellationToken);
+            Account created = await db.Accounts.FirstAsync(a => a.NormalizedUsername == normalized, cancellationToken);
+            audit.Add(db, SecurityAuditTypes.AccountCreated, new AuditTarget("Account", created.Id, created.Username), new { directory = "Toda", seeded = true });
+            await db.SaveChangesAsync(cancellationToken);
+            return (new ProvisionedAccount(created.Id, "created"), events);
+        }, requiresNew: true, cancellationToken, isTransactional: true);
+
+        if (made.Count > 0)
+        {
+            foreach (object e in made)
+            {
+                await Controllers.GuardEvents.PublishAsync(events, e, cancellationToken);
+            }
+
+            await merges.FoldPlaceholdersAsync(MergeReasons.AccountCreated, cancellationToken); // a placeholder with this address joins them (ADR 0044)
+        }
+
+        return account;
+    }
+
     public const string ImportedType = "imported";
 
     public Task<ProvisionedAccount> MatchOrCreatePlaceholderAsync(string source, string username, string? displayName, string? email, CancellationToken cancellationToken = default)
