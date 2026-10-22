@@ -113,13 +113,14 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache) : ITransientDepend
             cache.Remove(Key(session.TokenHash));
         }, requiresNew: true, cancellationToken);
 
-    /// <summary>Ends every live session of an account (it was locked, say); they stop working at once.</summary>
-    public async Task<int> EndAllAsync(Guid accountId, string reason, CancellationToken cancellationToken = default)
+    /// <summary>Ends every live session of an account but the one kept; they stop working at once.</summary>
+    public async Task<int> EndAllAsync(Guid accountId, string reason, Guid? except = null, CancellationToken cancellationToken = default)
     {
         List<string> ended = await guardDb.RunAsync(async db =>
         {
             DateTime now = DateTime.UtcNow;
-            List<WebSession> live = await db.WebSessions.Where(s => s.AccountId == accountId && s.RevokedAt == null && s.ExpiresAt > now).ToListAsync(cancellationToken);
+            List<WebSession> live = await db.WebSessions.Where(s => s.AccountId == accountId && s.RevokedAt == null && s.ExpiresAt > now && s.Id != except)
+                .ToListAsync(cancellationToken);
             foreach (WebSession session in live)
             {
                 session.RevokedAt = now;

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
+using OpenIddict.Abstractions;
 
 namespace Toda.Guard.Controllers;
 
@@ -121,4 +122,36 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
     }
 
     private static ObjectResult Error(int status, string code, string message) => new(new { error = new { code, message } }) { StatusCode = status };
+}
+
+/// <summary>
+/// Where the person is signed in (ADR 0075): browsers, the phone app, scripts. Each can be ended, or all but this one
+/// ("sign out everywhere else"). Ending this browser's session here is signing out.
+/// </summary>
+[Route("api/guard/me/sessions")]
+[Authorize]
+public class MySessionsController(AccountSessions sessions) : GuardControllerBase
+{
+    [HttpGet]
+    public Task<List<AccountSessionDto>> List(CancellationToken cancellationToken) =>
+        sessions.ListAsync(CurrentAccountId, CurrentSession, User.GetAuthorizationId(), cancellationToken);
+
+    [HttpDelete("{kind}/{id}")]
+    public async Task<NoContentResult> End(string kind, string id, CancellationToken cancellationToken)
+    {
+        await sessions.EndAsync(CurrentAccountId, kind, id, cancellationToken);
+        if (kind == SessionKinds.Browser && CurrentSession?.ToString() == id)
+        {
+            WebSessionHandler.Clear(HttpContext);
+        }
+
+        return NoContent();
+    }
+
+    /// <summary>Signs out everywhere else: every other browser, the phone app and scripts; this one goes on.</summary>
+    [HttpPost("everywhere")]
+    public Task<SessionsEndedDto> EndEverywhere(CancellationToken cancellationToken) =>
+        sessions.EndEverywhereAsync(CurrentAccountId, CurrentSession, User.GetAuthorizationId(), "everywhere", cancellationToken);
+
+    private Guid? CurrentSession => Guid.TryParse(User.FindFirst(WebSessionHandler.SessionIdClaim)?.Value, out Guid id) ? id : null;
 }

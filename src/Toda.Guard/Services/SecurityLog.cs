@@ -42,6 +42,9 @@ public static class SecurityAuditTypes
     public const string TokenRevoked = "token.revoked";
     public const string TokenSettingsChanged = "settings.tokens";
 
+    /// <summary>A person signed out everywhere else, or an admin locked the account: its sessions ended (ADR 0075).</summary>
+    public const string SessionsEnded = "auth.sessions.ended";
+
     /// <summary>OAuth for agents (M7): an MCP client registered itself, an admin made or removed an app.</summary>
     public const string OAuthAppRegistered = "oauth.app.registered";
     public const string OAuthAppCreated = "oauth.app.created";

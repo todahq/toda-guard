@@ -480,7 +480,10 @@ public class WebSession : Entity<Guid>
 
     public DateTime? RevokedAt { get; set; }
 
-    /// <summary>Why it ended early: signed-out, step-up (too many wrong passwords), or locked (an admin locked the account).</summary>
+    /// <summary>
+    /// Why it ended early: signed-out, step-up (too many wrong passwords), ended (from the person's list), everywhere (the
+    /// person signed out everywhere else), or locked (an admin locked the account).
+    /// </summary>
     public string? RevokedReason { get; set; }
 
     public bool IsActive(DateTime now) => RevokedAt is null && ExpiresAt > now;

@@ -18,7 +18,7 @@ namespace Toda.Guard.Controllers;
 [Route("api/guard/accounts")]
 [Authorize]
 public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountProjector projector, AccountMergeService merges, AccountEmailService emails,
-    SecurityLog audit, WebSessions sessions)
+    SecurityLog audit, AccountSessions sessions)
     : GuardControllerBase
 {
     [HttpGet]
@@ -170,10 +170,10 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
             return (AccountDto.From(account, directoryName), events);
         }, requiresNew: true, cancellationToken, isTransactional: true);
 
-        // Unlocking later doesn't bring back a session someone else may have had (ADR 0075).
+        // Unlocking later doesn't bring back a session someone else may have had: browsers', the phone's, scripts' (ADR 0075).
         if (locked)
         {
-            await sessions.EndAllAsync(id, "locked", cancellationToken);
+            await sessions.EndEverywhereAsync(id, keepSession: null, keepAuthorization: null, "locked", cancellationToken);
         }
 
         await PublishAsync(events);
