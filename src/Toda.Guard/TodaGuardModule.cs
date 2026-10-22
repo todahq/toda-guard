@@ -26,10 +26,19 @@ namespace Toda.Guard;
 [DependsOn(typeof(TodaPlatformModule))]
 public class TodaGuardModule : AbpModule
 {
-    /// <summary>The default authentication scheme: it sends each bearer token to the handler for its kind.</summary>
+    /// <summary>The default authentication scheme: it sends each bearer token to the handler for its kind, and a browser's cookie to its session's.</summary>
     public const string TodaBearer = "TodaBearer";
 
     public const string Version = "0.1.0";
+
+    /// <summary>
+    /// The scheme for a request (ADR 0075): a personal access token, any other bearer token (OpenIddict's), or with no
+    /// bearer token a browser's session cookie. A bearer token always wins, so a phone or tool never acts on a cookie.
+    /// </summary>
+    public static string SchemeFor(Microsoft.AspNetCore.Http.HttpRequest request) =>
+        PersonalTokenHandler.Carries(request) ? PersonalTokenHandler.SchemeName
+        : request.Headers.Authorization.Count == 0 && WebSessionHandler.Carries(request) ? WebSessionHandler.SchemeName
+        : OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme;
 
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
@@ -111,11 +120,17 @@ public class TodaGuardModule : AbpModule
                 options.UseAspNetCore();
             });
 
-        // A bearer token is either an access token from the token endpoint (OpenIddict) or a personal access token (M7).
+        // A bearer token is either an access token from the token endpoint (OpenIddict) or a personal access token (M7). A
+        // request without one is a browser's, signed in by its session cookie (ADR 0075).
+        context.Services.AddMemoryCache();
         context.Services.AddAuthentication(TodaBearer)
-            .AddPolicyScheme(TodaBearer, null, options => options.ForwardDefaultSelector = http =>
-                PersonalTokenHandler.Carries(http.Request) ? PersonalTokenHandler.SchemeName : OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme)
-            .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, PersonalTokenHandler>(PersonalTokenHandler.SchemeName, null);
+            .AddPolicyScheme(TodaBearer, null, options => options.ForwardDefaultSelector = http => SchemeFor(http.Request))
+            .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, PersonalTokenHandler>(PersonalTokenHandler.SchemeName, null)
+            .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, WebSessionHandler>(WebSessionHandler.SchemeName, null);
+
+        // Anti-forgery for the session cookie is the handler's own check (the X-Toda-Csrf header); ABP's, for its own
+        // cookie schemes, doesn't apply.
+        Configure<Volo.Abp.AspNetCore.Mvc.AntiForgery.AbpAntiForgeryOptions>(options => options.AutoValidate = false);
 
         context.Services.AddAuthorizationBuilder()
             .AddPolicy(TodaPolicies.Admin, policy => policy.RequireAuthenticatedUser().AddRequirements(new TodaAdminRequirement()));

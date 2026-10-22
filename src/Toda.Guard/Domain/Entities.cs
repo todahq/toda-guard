@@ -437,3 +437,51 @@ public class PersonalAccessToken : Entity<Guid>
 
     public bool IsActive(DateTime now) => RevokedAt is null && ExpiresAt > now;
 }
+
+/// <summary>
+/// A signed-in browser (ADR 0075): the <c>toda_session</c> cookie holds a random secret, and only its hash is kept. A
+/// session slides: each use pushes its end on, and a person ends theirs by signing out. A step-up marks the session with
+/// when the person last proved who they are.
+/// </summary>
+public class WebSession : Entity<Guid>
+{
+    protected WebSession()
+    {
+    }
+
+    public WebSession(Guid id, Guid accountId, string tokenHash, DateTime expiresAt, string? userAgent, string? ip)
+        : base(id)
+    {
+        AccountId = accountId;
+        TokenHash = tokenHash;
+        CreatedAt = DateTime.UtcNow;
+        LastSeenAt = CreatedAt;
+        AuthTime = CreatedAt;
+        ExpiresAt = expiresAt;
+        UserAgent = userAgent;
+        Ip = ip;
+    }
+
+    public Guid AccountId { get; private set; }
+
+    /// <summary>SHA-256 of the cookie's secret, in hex.</summary>
+    public string TokenHash { get; private set; } = null!;
+
+    public DateTime CreatedAt { get; private set; }
+    public DateTime LastSeenAt { get; set; }
+    public DateTime ExpiresAt { get; set; }
+
+    /// <summary>When the person last proved who they are: the sign-in, or the last step-up (ADR 0042).</summary>
+    public DateTime AuthTime { get; set; }
+
+    /// <summary>The browser it was made in, and from where, for the person's list of sessions.</summary>
+    public string? UserAgent { get; private set; }
+    public string? Ip { get; private set; }
+
+    public DateTime? RevokedAt { get; set; }
+
+    /// <summary>Why it ended early: signed-out, step-up (too many wrong passwords), or locked (an admin locked the account).</summary>
+    public string? RevokedReason { get; set; }
+
+    public bool IsActive(DateTime now) => RevokedAt is null && ExpiresAt > now;
+}

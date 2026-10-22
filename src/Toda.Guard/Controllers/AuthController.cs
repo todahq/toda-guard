@@ -12,7 +12,11 @@ namespace Toda.Guard.Controllers;
 /// everyone (ADR 0013): sunday, monday… Motion is how much the interface moves for them (ADR 0058): system (as their
 /// device says), reduced or full.
 /// </summary>
-public sealed record PreferencesDto(string? Language, string? TimeZone, string SiteTimeZone, string FirstDayOfWeek, string Motion);
+public sealed record PreferencesDto(string? Language, string? TimeZone, string SiteTimeZone, string FirstDayOfWeek, string Motion)
+{
+    public static PreferencesDto For(Account account, Toda.Platform.SiteCalendar calendar) =>
+        new(account.Language, account.TimeZone, calendar.TimeZone, calendar.FirstDayOfWeek.ToString().ToLowerInvariant(), account.Motion ?? "system");
+}
 
 public sealed record PreferencesInput(string? Language, string? TimeZone);
 
@@ -51,8 +55,7 @@ public class AuthController(GuardDb guardDb, MembershipGraph graph, Toda.Platfor
         }, requiresNew: true, cancellationToken: cancellationToken);
     }
 
-    private PreferencesDto Preferences(Account account) =>
-        new(account.Language, account.TimeZone, calendar.TimeZone, calendar.FirstDayOfWeek.ToString().ToLowerInvariant(), account.Motion ?? "system");
+    private PreferencesDto Preferences(Account account) => PreferencesDto.For(account, calendar);
 
     /// <summary>
     /// How much the interface moves for the person (ADR 0058): system follows their device's setting, reduced keeps

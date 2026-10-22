@@ -8,7 +8,7 @@ namespace Toda.Guard.Services;
 
 /// <summary>
 /// Removes security events older than the site keeps them (two years by default, ADR 0042), once an hour. The only
-/// thing that ever deletes an event.
+/// thing that ever deletes an event. Browsers' sessions that ended over a month ago go too (ADR 0075).
 /// </summary>
 public class SecurityAuditRetention(IServiceScopeFactory scopes, ILogger<SecurityAuditRetention> logger) : BackgroundService
 {
@@ -42,5 +42,7 @@ public class SecurityAuditRetention(IServiceScopeFactory scopes, ILogger<Securit
                    .ExecuteDeleteAsync(cancellationToken), requiresNew: true, cancellationToken: cancellationToken) == Batch)
         {
         }
+
+        await scope.ServiceProvider.GetRequiredService<WebSessions>().PruneAsync(cancellationToken);
     }
 }
