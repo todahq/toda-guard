@@ -449,18 +449,26 @@ public class WebSession : Entity<Guid>
     {
     }
 
-    public WebSession(Guid id, Guid accountId, string tokenHash, DateTime expiresAt, string? userAgent, string? ip)
+    public WebSession(Guid id, Guid accountId, string tokenHash, DateTime expiresAt, string? userAgent, string? ip, string? parentAuthorizationId = null,
+        DateTime? authTime = null)
         : base(id)
     {
         AccountId = accountId;
         TokenHash = tokenHash;
         CreatedAt = DateTime.UtcNow;
         LastSeenAt = CreatedAt;
-        AuthTime = CreatedAt;
+        AuthTime = authTime ?? CreatedAt;
         ExpiresAt = expiresAt;
         UserAgent = userAgent;
         Ip = ip;
+        ParentAuthorizationId = parentAuthorizationId;
     }
+
+    /// <summary>
+    /// For a web view the phone app opened (ADR 0075's handoff): the app's sign-in (its OpenIddict permission), which the
+    /// session ends with. Null for a browser someone signed in to.
+    /// </summary>
+    public string? ParentAuthorizationId { get; private set; }
 
     public Guid AccountId { get; private set; }
 
@@ -487,4 +495,41 @@ public class WebSession : Entity<Guid>
     public string? RevokedReason { get; set; }
 
     public bool IsActive(DateTime now) => RevokedAt is null && ExpiresAt > now;
+}
+
+/// <summary>
+/// A single-use code the phone app trades its sign-in for a web view's session with (ADR 0075): asked for with the
+/// app's bearer token, opened by the web view within seconds, and good once. Only its hash is kept.
+/// </summary>
+public class SessionHandoff : Entity<Guid>
+{
+    protected SessionHandoff()
+    {
+    }
+
+    public SessionHandoff(Guid id, string codeHash, Guid accountId, string authorizationId, DateTime authTime, DateTime expiresAt)
+        : base(id)
+    {
+        CodeHash = codeHash;
+        AccountId = accountId;
+        AuthorizationId = authorizationId;
+        AuthTime = authTime;
+        ExpiresAt = expiresAt;
+        CreatedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>SHA-256 of the code, in hex.</summary>
+    public string CodeHash { get; private set; } = null!;
+
+    public Guid AccountId { get; private set; }
+
+    /// <summary>The app's sign-in (its OpenIddict permission) the web view's session will belong to.</summary>
+    public string AuthorizationId { get; private set; } = null!;
+
+    /// <summary>When the person last proved who they are, as the app's token says: the web view's session starts with it.</summary>
+    public DateTime AuthTime { get; private set; }
+
+    public DateTime CreatedAt { get; private set; }
+    public DateTime ExpiresAt { get; private set; }
+    public DateTime? UsedAt { get; set; }
 }

@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Toda.Guard.Domain;
 using Toda.Platform.Acting;
+using OpenIddict.Abstractions;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
@@ -22,13 +23,16 @@ public sealed record WebSessionInfo(Guid Id, Guid AccountId, string Username, st
 /// a step-up, and ended. A found session is kept in memory for a few seconds, so most requests don't read the table; an
 /// ended one stops working at once on this server, and within those seconds on the others.
 /// </summary>
-public class WebSessions(GuardDb guardDb, IMemoryCache cache) : ITransientDependency
+public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthorizationManager authorizations) : ITransientDependency
 {
     /// <summary>How long a session lives unused; each use pushes its end on (as the web's refresh tokens did, ADR 0007).</summary>
     public static readonly TimeSpan Lifetime = TimeSpan.FromDays(14);
 
     /// <summary>How long ended and expired sessions are kept before they're removed.</summary>
     public static readonly TimeSpan KeptAfterEnd = TimeSpan.FromDays(30);
+
+    /// <summary>How long the phone app's handoff code is good for: long enough to open a web view, no longer.</summary>
+    public static readonly TimeSpan HandoffLifetime = TimeSpan.FromSeconds(30);
 
     private static readonly TimeSpan Remembered = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan SeenEvery = TimeSpan.FromMinutes(1);
@@ -45,11 +49,16 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache) : ITransientDepend
     public static bool CsrfMatches(string secret, string? header) =>
         header is { Length: > 0 } && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(CsrfFor(secret)), Encoding.UTF8.GetBytes(header));
 
-    /// <summary>A new session for an account that just proved who it is; the secret is the cookie's, never kept.</summary>
-    public async Task<(WebSession Session, string Secret)> StartAsync(Guid accountId, string? userAgent, string? ip, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// A new session for an account that just proved who it is; the secret is the cookie's, never kept. A web view's
+    /// session names the phone app's sign-in it came from, and when that proved who the person is.
+    /// </summary>
+    public async Task<(WebSession Session, string Secret)> StartAsync(Guid accountId, string? userAgent, string? ip, string? parentAuthorizationId = null,
+        DateTime? authTime = null, CancellationToken cancellationToken = default)
     {
         string secret = Base64Url(RandomNumberGenerator.GetBytes(32));
-        WebSession session = new(Guid.NewGuid(), accountId, Hash(secret), DateTime.UtcNow.Add(Lifetime), userAgent is { Length: > 256 } ? userAgent[..256] : userAgent, ip);
+        WebSession session = new(Guid.NewGuid(), accountId, Hash(secret), DateTime.UtcNow.Add(Lifetime), userAgent is { Length: > 256 } ? userAgent[..256] : userAgent, ip,
+            parentAuthorizationId, authTime);
         await guardDb.RunAsync(async db =>
         {
             db.WebSessions.Add(session);
@@ -59,8 +68,8 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache) : ITransientDepend
     }
 
     /// <summary>
-    /// The live session with this secret, its account active. Slid is true when its end just moved on (at most once a
-    /// minute), so the cookies are set again to last as long.
+    /// The live session with this secret, its account active, and for a web view the phone app's sign-in still standing.
+    /// Slid is true when its end just moved on (at most once a minute), so the cookies are set again to last as long.
     /// </summary>
     public async Task<(WebSessionInfo Info, bool Slid)?> FindAsync(string secret, CancellationToken cancellationToken = default)
     {
@@ -76,10 +85,20 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache) : ITransientDepend
             var found = await db.WebSessions.AsNoTracking()
                 .Where(s => s.TokenHash == hash && s.RevokedAt == null && s.ExpiresAt > now)
                 .Join(db.Accounts.Where(a => a.Status == AccountStatus.Active), s => s.AccountId, a => a.Id,
-                    (s, a) => new { s.Id, s.AccountId, a.Username, a.DisplayName, s.AuthTime, s.LastSeenAt })
+                    (s, a) => new { s.Id, s.AccountId, a.Username, a.DisplayName, s.AuthTime, s.LastSeenAt, s.ParentAuthorizationId })
                 .FirstOrDefaultAsync(cancellationToken);
             if (found is null)
             {
+                return null;
+            }
+
+            // A web view's session ends with the app's sign-in, however that ended (the app signed out, the token was revoked).
+            if (found.ParentAuthorizationId is { } parent
+                && (await authorizations.FindByIdAsync(parent, cancellationToken) is not { } authorization
+                    || await authorizations.GetStatusAsync(authorization, cancellationToken) != OpenIddictConstants.Statuses.Valid))
+            {
+                await db.WebSessions.Where(s => s.Id == found.Id)
+                    .ExecuteUpdateAsync(set => set.SetProperty(s => s.RevokedAt, now).SetProperty(s => s.RevokedReason, "app-ended"), cancellationToken);
                 return null;
             }
 
@@ -113,14 +132,23 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache) : ITransientDepend
             cache.Remove(Key(session.TokenHash));
         }, requiresNew: true, cancellationToken);
 
-    /// <summary>Ends every live session of an account but the one kept; they stop working at once.</summary>
-    public async Task<int> EndAllAsync(Guid accountId, string reason, Guid? except = null, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Ends every live session of an account but the one kept, and the web views of the phone app's sign-in kept; they
+    /// stop working at once.
+    /// </summary>
+    public Task<int> EndAllAsync(Guid accountId, string reason, Guid? except = null, string? exceptOpenedBy = null, CancellationToken cancellationToken = default) =>
+        EndWhereAsync(s => s.AccountId == accountId && s.Id != except && (exceptOpenedBy == null || s.ParentAuthorizationId != exceptOpenedBy), reason, cancellationToken);
+
+    /// <summary>Ends the web views' sessions the phone app's sign-in opened (it ended).</summary>
+    public Task<int> EndOpenedByAsync(string authorizationId, CancellationToken cancellationToken = default) =>
+        EndWhereAsync(s => s.ParentAuthorizationId == authorizationId, "app-ended", cancellationToken);
+
+    private async Task<int> EndWhereAsync(System.Linq.Expressions.Expression<Func<WebSession, bool>> which, string reason, CancellationToken cancellationToken)
     {
         List<string> ended = await guardDb.RunAsync(async db =>
         {
             DateTime now = DateTime.UtcNow;
-            List<WebSession> live = await db.WebSessions.Where(s => s.AccountId == accountId && s.RevokedAt == null && s.ExpiresAt > now && s.Id != except)
-                .ToListAsync(cancellationToken);
+            List<WebSession> live = await db.WebSessions.Where(which).Where(s => s.RevokedAt == null && s.ExpiresAt > now).ToListAsync(cancellationToken);
             foreach (WebSession session in live)
             {
                 session.RevokedAt = now;
@@ -154,7 +182,42 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache) : ITransientDepend
             return session.AuthTime;
         }, requiresNew: true, cancellationToken);
 
-    /// <summary>Removes sessions that ended or expired over a month ago.</summary>
+    /// <summary>
+    /// A code the phone app opens a web view with (ADR 0075): good once, for seconds, for a session that belongs to the
+    /// app's sign-in. Only its hash is kept.
+    /// </summary>
+    public async Task<(string Code, DateTime ExpiresAt)> HandOffAsync(Guid accountId, string authorizationId, DateTime authTime, CancellationToken cancellationToken = default)
+    {
+        string code = Base64Url(RandomNumberGenerator.GetBytes(32));
+        SessionHandoff handoff = new(Guid.NewGuid(), Hash(code), accountId, authorizationId, authTime, DateTime.UtcNow.Add(HandoffLifetime));
+        await guardDb.RunAsync(async db =>
+        {
+            db.SessionHandoffs.Add(handoff);
+            await db.SaveChangesAsync(cancellationToken);
+        }, requiresNew: true, cancellationToken);
+        return (code, handoff.ExpiresAt);
+    }
+
+    /// <summary>
+    /// Takes a handoff code, once: the account (still active), the app's sign-in and its proof time; null when the code is
+    /// unknown, used or too old. Two web views opening the same code can't both have it.
+    /// </summary>
+    public Task<SessionHandoff?> TakeHandoffAsync(string code, CancellationToken cancellationToken = default) =>
+        guardDb.RunAsync(async db =>
+        {
+            string hash = Hash(code);
+            DateTime now = DateTime.UtcNow;
+            if (await db.SessionHandoffs.Where(h => h.CodeHash == hash && h.UsedAt == null && h.ExpiresAt > now)
+                    .ExecuteUpdateAsync(set => set.SetProperty(h => h.UsedAt, now), cancellationToken) == 0)
+            {
+                return null;
+            }
+
+            SessionHandoff handoff = await db.SessionHandoffs.AsNoTracking().FirstAsync(h => h.CodeHash == hash, cancellationToken);
+            return await db.Accounts.AnyAsync(a => a.Id == handoff.AccountId && a.Status == AccountStatus.Active, cancellationToken) ? handoff : null;
+        }, requiresNew: true, cancellationToken);
+
+    /// <summary>Removes sessions that ended or expired over a month ago, and handoff codes over a day old.</summary>
     public async Task PruneAsync(CancellationToken cancellationToken = default)
     {
         DateTime before = DateTime.UtcNow - KeptAfterEnd;
@@ -162,6 +225,9 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache) : ITransientDepend
                    .ExecuteDeleteAsync(cancellationToken), requiresNew: true, cancellationToken: cancellationToken) == Batch)
         {
         }
+
+        DateTime dayAgo = DateTime.UtcNow.AddDays(-1);
+        await guardDb.RunAsync(db => db.SessionHandoffs.Where(h => h.ExpiresAt < dayAgo).ExecuteDeleteAsync(cancellationToken), requiresNew: true, cancellationToken: cancellationToken);
     }
 
     private static string Key(string hash) => "toda:web-session:" + hash;
@@ -181,6 +247,9 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
     public const string CookieName = "toda_session";
     public const string CsrfCookieName = "toda_csrf";
     public const string CsrfHeader = "X-Toda-Csrf";
+
+    /// <summary>Set by the phone app's handoff: the shell shows only the page, and talks to the app (ADR 0073, 0075).</summary>
+    public const string EmbeddedCookieName = "toda_embedded";
 
     /// <summary>The session's id (OpenID Connect's claim), so the person's list can say which session is this one.</summary>
     public const string SessionIdClaim = "sid";
@@ -251,23 +320,33 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
     }
 
     /// <summary>Sets the session's cookies: its secret (only the server reads it) and the anti-forgery value (the page reads it).</summary>
-    public static void Issue(HttpContext http, string secret)
+    /// <param name="embedded">
+    /// Whether the shell shows itself embedded, in the phone app's web view (<c>toda_embedded</c>, read by the web): true
+    /// for a handoff, false for a sign-in, null to keep what the browser has.
+    /// </param>
+    public static void Issue(HttpContext http, string secret, bool? embedded = null)
     {
         bool secure = IsHttps(http.Request);
-        http.Response.Cookies.Append(CookieName, secret, new CookieOptions
+        CookieOptions Cookie(bool httpOnly) => new()
         {
-            HttpOnly = true, Secure = secure, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = WebSessions.Lifetime, IsEssential = true,
-        });
-        http.Response.Cookies.Append(CsrfCookieName, WebSessions.CsrfFor(secret), new CookieOptions
+            HttpOnly = httpOnly, Secure = secure, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = WebSessions.Lifetime, IsEssential = true,
+        };
+        http.Response.Cookies.Append(CookieName, secret, Cookie(httpOnly: true));
+        http.Response.Cookies.Append(CsrfCookieName, WebSessions.CsrfFor(secret), Cookie(httpOnly: false));
+        if (embedded ?? http.Request.Cookies.ContainsKey(EmbeddedCookieName))
         {
-            HttpOnly = false, Secure = secure, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = WebSessions.Lifetime, IsEssential = true,
-        });
+            http.Response.Cookies.Append(EmbeddedCookieName, "1", Cookie(httpOnly: false));
+        }
+        else if (embedded is false)
+        {
+            http.Response.Cookies.Delete(EmbeddedCookieName, new CookieOptions { Secure = secure, SameSite = SameSiteMode.Lax, Path = "/" });
+        }
     }
 
     public static void Clear(HttpContext http)
     {
         bool secure = IsHttps(http.Request);
-        foreach (string name in new[] { CookieName, CsrfCookieName })
+        foreach (string name in new[] { CookieName, CsrfCookieName, EmbeddedCookieName })
         {
             http.Response.Cookies.Delete(name, new CookieOptions { Secure = secure, SameSite = SameSiteMode.Lax, Path = "/" });
         }

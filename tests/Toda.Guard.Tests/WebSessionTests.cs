@@ -101,9 +101,46 @@ public class WebSessionTests
 
         DefaultHttpContext cleared = new();
         WebSessionHandler.Clear(cleared);
-        Assert.Equal(2, cleared.Response.Headers.SetCookie.Count);
+        Assert.Equal(3, cleared.Response.Headers.SetCookie.Count);
         Assert.All(cleared.Response.Headers.SetCookie.ToArray(), c => Assert.Contains("expires=Thu, 01 Jan 1970", c!, StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void A_handoff_marks_the_browser_embedded_and_a_sign_in_unmarks_it()
+    {
+        static string? Embedded(DefaultHttpContext http) =>
+            http.Response.Headers.SetCookie.ToArray().FirstOrDefault(c => c!.StartsWith(WebSessionHandler.EmbeddedCookieName + "=", StringComparison.Ordinal));
+
+        DefaultHttpContext handoff = new();
+        WebSessionHandler.Issue(handoff, Secret, embedded: true);
+        Assert.StartsWith(WebSessionHandler.EmbeddedCookieName + "=1;", Embedded(handoff));
+
+        DefaultHttpContext signIn = new();
+        signIn.Request.Headers.Cookie = $"{WebSessionHandler.EmbeddedCookieName}=1";
+        WebSessionHandler.Issue(signIn, Secret, embedded: false);
+        Assert.Contains("expires=Thu, 01 Jan 1970", Embedded(signIn), StringComparison.OrdinalIgnoreCase);
+
+        DefaultHttpContext slid = new();
+        slid.Request.Headers.Cookie = $"{WebSessionHandler.EmbeddedCookieName}=1";
+        WebSessionHandler.Issue(slid, Secret);
+        Assert.StartsWith(WebSessionHandler.EmbeddedCookieName + "=1;", Embedded(slid));
+        DefaultHttpContext plain = new();
+        WebSessionHandler.Issue(plain, Secret);
+        Assert.Null(Embedded(plain));
+    }
+
+    [Theory]
+    [InlineData("/browse/PAY-4?tab=history", "/browse/PAY-4?tab=history")]
+    [InlineData("/apps/test-management/cases", "/apps/test-management/cases")]
+    [InlineData("//evil.example/x", "/")]
+    [InlineData("/\\evil.example", "/")]
+    [InlineData("https://evil.example/", "/")]
+    [InlineData("javascript:alert(1)", "/")]
+    [InlineData("/ok\r\nSet-Cookie: x=1", "/")]
+    [InlineData("", "/")]
+    [InlineData(null, "/")]
+    public void A_web_view_goes_on_only_to_a_page_of_the_site(string? next, string expected) =>
+        Assert.Equal(expected, Toda.Guard.Controllers.SessionController.SafeNext(next));
 
     private static HttpRequest Request(string method = "GET", string? authorization = null, string? cookie = null)
     {

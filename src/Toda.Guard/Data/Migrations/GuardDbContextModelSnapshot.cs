@@ -621,6 +621,46 @@ namespace Toda.Guard.Data.Migrations
                     b.ToTable("security_settings", "guard");
                 });
 
+            modelBuilder.Entity("Toda.Guard.Domain.SessionHandoff", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AuthTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AuthorizationId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CodeHash")
+                        .IsUnique();
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("session_handoffs", "guard");
+                });
+
             modelBuilder.Entity("Toda.Guard.Domain.SignUpSettings", b =>
                 {
                     b.Property<Guid>("Id")
@@ -763,6 +803,10 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<DateTime>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ParentAuthorizationId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<DateTime?>("RevokedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -784,6 +828,8 @@ namespace Toda.Guard.Data.Migrations
                     b.HasIndex("AccountId");
 
                     b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("ParentAuthorizationId");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();

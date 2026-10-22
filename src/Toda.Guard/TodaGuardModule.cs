@@ -81,6 +81,8 @@ public class TodaGuardModule : AbpModule
                     .SetAuthorizationEndpointUris("connect/authorize");
                 options.AllowPasswordFlow().AllowRefreshTokenFlow().AllowAuthorizationCodeFlow().RequireProofKeyForCodeExchange();
                 options.RegisterScopes(OpenIddictConstants.Scopes.OfflineAccess, GuardOidc.ApiScope, OAuthAgents.ReadScope);
+                // Revoking the phone app's (or a script's) refresh token ends its whole sign-in (ADR 0075).
+                options.AddEventHandler(EndSignInOnRevocation.Descriptor);
                 // MCP clients register themselves (RFC 7591) at the endpoint the discovery document names.
                 options.AddEventHandler<OpenIddict.Server.OpenIddictServerEvents.HandleConfigurationRequestContext>(handler => handler.UseInlineHandler(context =>
                 {
@@ -96,7 +98,9 @@ public class TodaGuardModule : AbpModule
                     }
 
                     return default;
-                }).SetOrder(int.MaxValue - 100_000));
+                    // After OpenIddict sets the issuer, before it fills in the endpoints still empty. Not the issuer's own
+                    // order: with two handlers on one order, which runs first changes as handlers are added.
+                }).SetOrder(OpenIddict.Server.OpenIddictServerHandlers.Discovery.AttachIssuer.Descriptor.Order + 500));
                 // PKCE with S256 only: "plain" would hand the verifier over in the clear (MCP requires S256).
                 options.Configure(server => server.CodeChallengeMethods.Remove(OpenIddictConstants.CodeChallengeMethods.Plain));
                 options.SetAccessTokenLifetime(TimeSpan.FromMinutes(15))

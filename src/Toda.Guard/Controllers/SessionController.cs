@@ -18,6 +18,9 @@ public sealed record SessionDto(AccountDto Account, PreferencesDto Preferences, 
 /// <summary>When a step-up passed: the session's new proof of who the person is.</summary>
 public sealed record SessionStepUpDto(DateTime AuthTime);
 
+/// <summary>The phone app's code for a web view: open <c>/api/guard/session/handoff?code=…&amp;next=…</c> before it expires.</summary>
+public sealed record SessionHandoffDto(string Code, DateTime ExpiresAt);
+
 /// <summary>
 /// The web's sign-in, sign-out and step-up (ADR 0075). Signing in checks the password with the account's directory, as
 /// the token endpoint does, and answers with the session's cookies: <c>toda_session</c> (only the server reads it) and
@@ -55,13 +58,10 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
             };
         }
 
-        if (Request.Cookies[WebSessionHandler.CookieName] is { Length: > 0 } before && await sessions.FindAsync(before, cancellationToken) is { } previous)
-        {
-            await sessions.EndAsync(previous.Info.Id, "signed-out", cancellationToken);
-        }
-
-        (WebSession session, string secret) = await sessions.StartAsync(result.Account!.Id, Request.Headers.UserAgent.ToString(), ClientIp, cancellationToken);
-        WebSessionHandler.Issue(HttpContext, secret);
+        await EndPreviousAsync(cancellationToken);
+        (WebSession session, string secret) = await sessions.StartAsync(result.Account!.Id, Request.Headers.UserAgent.ToString(), ClientIp,
+            cancellationToken: cancellationToken);
+        WebSessionHandler.Issue(HttpContext, secret, embedded: false);
         return Ok(await guardDb.RunAsync(async db =>
         {
             Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == session.AccountId, cancellationToken);
@@ -121,6 +121,72 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
             : Error(401, "session_ended", "Your session has ended. Sign in again.");
     }
 
+    /// <summary>
+    /// The phone app hands its sign-in to a web view (ADR 0075): with its bearer token it gets a code that's good once, for
+    /// 30 seconds, which the web view opens below. Only the app asks: not a browser, a script or another app.
+    /// </summary>
+    [HttpPost("handoff")]
+    [Authorize]
+    [ProducesResponseType<SessionHandoffDto>(200)]
+    public async Task<IActionResult> HandOff([FromServices] AccountSessions accountSessions, CancellationToken cancellationToken)
+    {
+        if (User.GetAuthorizationId() is not { } authorizationId || Acting.TokenId is not null
+            || await accountSessions.KindOfSignInAsync(authorizationId, cancellationToken) != SessionKinds.Phone)
+        {
+            return Error(400, "not_the_app", "Only the phone app hands its sign-in to a web view.");
+        }
+
+        (string code, DateTime expiresAt) = await sessions.HandOffAsync(CurrentAccountId, authorizationId, Acting.AuthTime?.UtcDateTime ?? DateTime.UnixEpoch, cancellationToken);
+        return Ok(new SessionHandoffDto(code, expiresAt));
+    }
+
+    /// <summary>
+    /// The web view opens this with the app's code. The code is taken (once), a session starts for the web view, tied to
+    /// the app's sign-in, and the browser goes on to <c>next</c> with the shell embedded. A used, unknown or old code goes
+    /// to the sign-in page instead. The code is in an address only for these seconds: the answer is a redirect that sends
+    /// no referrer and isn't kept.
+    /// </summary>
+    [HttpGet("handoff")]
+    [AllowAnonymous]
+    public async Task<IActionResult> TakeHandoff([FromQuery] string? code, [FromQuery] string? next, CancellationToken cancellationToken)
+    {
+        Response.Headers["Referrer-Policy"] = "no-referrer";
+        Response.Headers.CacheControl = "no-store";
+        string target = SafeNext(next);
+        // A page on another site can't sign this browser in to someone else's account: the app opens the address itself.
+        if (Request.Headers["Sec-Fetch-Site"].ToString() is { Length: > 0 } site && site is not ("none" or "same-origin"))
+        {
+            return Error(403, "cross_site_request", "This request came from another site and was refused.");
+        }
+
+        if (code is not { Length: > 0 } || await sessions.TakeHandoffAsync(code, cancellationToken) is not { } handoff)
+        {
+            return Redirect("/login?next=" + Uri.EscapeDataString(target));
+        }
+
+        await EndPreviousAsync(cancellationToken);
+        (_, string secret) = await sessions.StartAsync(handoff.AccountId, Request.Headers.UserAgent.ToString(), ClientIp, handoff.AuthorizationId, handoff.AuthTime,
+            cancellationToken);
+        WebSessionHandler.Issue(HttpContext, secret, embedded: true);
+        return Redirect(target);
+    }
+
+    /// <summary>Where to go on to: a page of this site (a path), never another site.</summary>
+    public static string SafeNext(string? next) =>
+        next is { Length: > 0 } && next[0] == '/' && !next.StartsWith("//", StringComparison.Ordinal) && !next.StartsWith("/\\", StringComparison.Ordinal)
+        && !next.Any(char.IsControl)
+            ? next
+            : "/";
+
+    /// <summary>A session this browser had before ends: one browser, one session.</summary>
+    private async Task EndPreviousAsync(CancellationToken cancellationToken)
+    {
+        if (Request.Cookies[WebSessionHandler.CookieName] is { Length: > 0 } before && await sessions.FindAsync(before, cancellationToken) is { } previous)
+        {
+            await sessions.EndAsync(previous.Info.Id, "signed-out", cancellationToken);
+        }
+    }
+
     private static ObjectResult Error(int status, string code, string message) => new(new { error = new { code, message } }) { StatusCode = status };
 }
 
@@ -135,6 +201,19 @@ public class MySessionsController(AccountSessions sessions) : GuardControllerBas
     [HttpGet]
     public Task<List<AccountSessionDto>> List(CancellationToken cancellationToken) =>
         sessions.ListAsync(CurrentAccountId, CurrentSession, User.GetAuthorizationId(), cancellationToken);
+
+    /// <summary>Ends the request's own session: a browser (or a web view) signing out, or the phone app signing out, its web views with it.</summary>
+    [HttpDelete("current")]
+    public async Task<NoContentResult> EndCurrent(CancellationToken cancellationToken)
+    {
+        await sessions.EndCurrentAsync(CurrentAccountId, CurrentSession, User.GetAuthorizationId(), cancellationToken);
+        if (CurrentSession is not null)
+        {
+            WebSessionHandler.Clear(HttpContext);
+        }
+
+        return NoContent();
+    }
 
     [HttpDelete("{kind}/{id}")]
     public async Task<NoContentResult> End(string kind, string id, CancellationToken cancellationToken)

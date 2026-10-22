@@ -24,6 +24,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     public DbSet<SecuritySettings> SecuritySettings => Set<SecuritySettings>();
     public DbSet<PersonalAccessToken> PersonalAccessTokens => Set<PersonalAccessToken>();
     public DbSet<WebSession> WebSessions => Set<WebSession>();
+    public DbSet<SessionHandoff> SessionHandoffs => Set<SessionHandoff>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<RoleRule> RoleRules => Set<RoleRule>();
     public DbSet<RoleGrant> RoleGrants => Set<RoleGrant>();
@@ -234,8 +235,19 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.Property(x => x.UserAgent).HasMaxLength(256);
             b.Property(x => x.Ip).HasMaxLength(64);
             b.Property(x => x.RevokedReason).HasMaxLength(32);
+            b.Property(x => x.ParentAuthorizationId).HasMaxLength(100);
             b.HasIndex(x => x.TokenHash).IsUnique();
             b.HasIndex(x => x.AccountId);
+            b.HasIndex(x => x.ExpiresAt);
+            b.HasIndex(x => x.ParentAuthorizationId);
+        });
+
+        builder.Entity<SessionHandoff>(b =>
+        {
+            b.ToTable("session_handoffs");
+            b.Property(x => x.CodeHash).HasMaxLength(64).IsRequired();
+            b.Property(x => x.AuthorizationId).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => x.CodeHash).IsUnique();
             b.HasIndex(x => x.ExpiresAt);
         });
     }

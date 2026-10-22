@@ -42,9 +42,11 @@ public class AccountSessions(GuardDb guardDb, WebSessions web, IOpenIddictApplic
     /// <summary>The person's live sessions, the current one first, then the most recently used.</summary>
     public async Task<List<AccountSessionDto>> ListAsync(Guid accountId, Guid? currentSession, string? currentAuthorization, CancellationToken cancellationToken = default)
     {
+        currentAuthorization ??= await OpenedByAsync(currentSession, cancellationToken);
         DateTime now = DateTime.UtcNow;
+        // The phone app's web views belong to its sign-in, listed once.
         List<AccountSessionDto> sessions = await guardDb.RunAsync(db => db.WebSessions.AsNoTracking()
-            .Where(s => s.AccountId == accountId && s.RevokedAt == null && s.ExpiresAt > now)
+            .Where(s => s.AccountId == accountId && s.RevokedAt == null && s.ExpiresAt > now && s.ParentAuthorizationId == null)
             .OrderByDescending(s => s.LastSeenAt).Take(Most)
             .Select(s => new AccountSessionDto(s.Id.ToString(), SessionKinds.Browser, s.Id == currentSession, s.CreatedAt, s.LastSeenAt, s.ExpiresAt, s.UserAgent, s.Ip))
             .ToListAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -84,12 +86,39 @@ public class AccountSessions(GuardDb guardDb, WebSessions web, IOpenIddictApplic
     }
 
     /// <summary>
+    /// The phone app or a script revoked its refresh token at the token endpoint (signing out): its whole sign-in ends,
+    /// with its other tokens and the web views it opened. Anything else's (an app the person allowed) is left as it is.
+    /// </summary>
+    public async Task EndSignInAsync(string authorizationId, CancellationToken cancellationToken = default)
+    {
+        if (await KindOfSignInAsync(authorizationId, cancellationToken) is not null && await authorizations.FindByIdAsync(authorizationId, cancellationToken) is { } authorization)
+        {
+            await RevokeAsync(authorization, cancellationToken);
+        }
+    }
+
+    /// <summary>Ends the session or sign-in a request came with: a browser signing out, or the phone app signing out.</summary>
+    public async Task EndCurrentAsync(Guid accountId, Guid? currentSession, string? currentAuthorization, CancellationToken cancellationToken = default)
+    {
+        if (currentSession is { } session)
+        {
+            await web.EndAsync(session, "signed-out", cancellationToken);
+        }
+        else if (currentAuthorization is not null && await KindOfSignInAsync(currentAuthorization, cancellationToken) is { } kind)
+        {
+            await EndAsync(accountId, kind, currentAuthorization, cancellationToken);
+        }
+    }
+
+    /// <summary>
     /// Ends every session of the person but the one kept (the request's own): signing out everywhere else, or, with
     /// nothing kept, an admin locking the account.
     /// </summary>
     public async Task<SessionsEndedDto> EndEverywhereAsync(Guid accountId, Guid? keepSession, string? keepAuthorization, string reason, CancellationToken cancellationToken = default)
     {
-        int browsers = await web.EndAllAsync(accountId, reason, keepSession, cancellationToken);
+        // From the phone app's web view, the app's sign-in is this one too.
+        keepAuthorization ??= await OpenedByAsync(keepSession, cancellationToken);
+        int browsers = await web.EndAllAsync(accountId, reason, keepSession, keepAuthorization, cancellationToken);
         int apps = 0;
         foreach (AppSignIn signIn in await AppSignInsAsync(accountId, cancellationToken))
         {
@@ -160,6 +189,20 @@ public class AccountSessions(GuardDb guardDb, WebSessions web, IOpenIddictApplic
         public DateTime? Expires { get; set; }
     }
 
+    /// <summary>The phone app's sign-in a web view's session was opened by; null for a browser's own.</summary>
+    private Task<string?> OpenedByAsync(Guid? sessionId, CancellationToken cancellationToken) =>
+        sessionId is { } id
+            ? guardDb.RunAsync(db => db.WebSessions.Where(s => s.Id == id).Select(s => s.ParentAuthorizationId).FirstOrDefaultAsync(cancellationToken), cancellationToken: cancellationToken)
+            : Task.FromResult<string?>(null);
+
+    /// <summary>What a sign-in (an OpenIddict permission) is: phone, script, or null for anything else.</summary>
+    public async Task<string?> KindOfSignInAsync(string authorizationId, CancellationToken cancellationToken = default) =>
+        await authorizations.FindByIdAsync(authorizationId, cancellationToken) is { } authorization
+        && await authorizations.GetStatusAsync(authorization, cancellationToken) == Statuses.Valid
+        && await authorizations.GetApplicationIdAsync(authorization, cancellationToken) is { } appId
+            ? await KindOfAsync(appId, cancellationToken)
+            : null;
+
     /// <summary>Phone for the app, script for toda-web; null for any other app (OAuth apps are listed apart).</summary>
     private async Task<string?> KindOfAsync(string applicationId, CancellationToken cancellationToken) =>
         await applications.FindByIdAsync(applicationId, cancellationToken) is { } app
@@ -171,10 +214,34 @@ public class AccountSessions(GuardDb guardDb, WebSessions web, IOpenIddictApplic
             }
             : null;
 
+    /// <summary>A sign-in ends: its permission and tokens are revoked, and the web views it opened end with it.</summary>
     private async Task RevokeAsync(object authorization, CancellationToken cancellationToken)
     {
         string id = (await authorizations.GetIdAsync(authorization, cancellationToken))!;
         await authorizations.TryRevokeAsync(authorization, cancellationToken);
         await tokens.RevokeByAuthorizationIdAsync(id, cancellationToken);
+        await web.EndOpenedByAsync(id, cancellationToken);
+    }
+}
+
+/// <summary>
+/// The phone app (or a script) signing out revokes its refresh token at the token endpoint (RFC 7009): its whole sign-in
+/// ends, with its other tokens and the web views it opened (ADR 0075), not just the one token.
+/// </summary>
+public sealed class EndSignInOnRevocation(AccountSessions sessions) : OpenIddict.Server.IOpenIddictServerHandler<OpenIddict.Server.OpenIddictServerEvents.HandleRevocationRequestContext>
+{
+    public static OpenIddict.Server.OpenIddictServerHandlerDescriptor Descriptor { get; } =
+        OpenIddict.Server.OpenIddictServerHandlerDescriptor.CreateBuilder<OpenIddict.Server.OpenIddictServerEvents.HandleRevocationRequestContext>()
+            .UseScopedHandler<EndSignInOnRevocation>()
+            .SetOrder(OpenIddict.Server.OpenIddictServerHandlers.Revocation.RevokeToken.Descriptor.Order + 1_000)
+            .SetType(OpenIddict.Server.OpenIddictServerHandlerType.Custom)
+            .Build();
+
+    public async ValueTask HandleAsync(OpenIddict.Server.OpenIddictServerEvents.HandleRevocationRequestContext context)
+    {
+        if (context.GenericTokenPrincipal?.GetTokenType() == TokenTypeIdentifiers.RefreshToken && context.GenericTokenPrincipal.GetAuthorizationId() is { } authorizationId)
+        {
+            await sessions.EndSignInAsync(authorizationId, context.CancellationToken);
+        }
     }
 }
