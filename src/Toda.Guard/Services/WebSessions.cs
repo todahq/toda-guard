@@ -196,7 +196,7 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
             return AuthenticateResult.NoResult();
         }
 
-        if (!IsSafe(Request.Method) && !WebSessions.CsrfMatches(secret, Request.Headers[CsrfHeader].ToString()))
+        if (!IsSafe(Request.Method) && !WebSessions.CsrfMatches(secret, await CsrfValueAsync()))
         {
             Context.Items[CsrfFailedItem] = true;
             return AuthenticateResult.Fail("The request changes something but has no anti-forgery header, or a wrong one.");
@@ -221,6 +221,20 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
         identity.AddClaim(new Claim(ActingContext.AuthTimeClaim, new DateTimeOffset(found.Info.AuthTime, TimeSpan.Zero).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture)));
         identity.AddClaim(new Claim("amr", "pwd"));
         return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
+    }
+
+    /// <summary>
+    /// The anti-forgery value a request came with: the header, or for a plain HTML form (the OAuth consent page's, which
+    /// can't set headers) a field of the same name as the cookie.
+    /// </summary>
+    private async Task<string?> CsrfValueAsync()
+    {
+        if (Request.Headers[CsrfHeader].ToString() is { Length: > 0 } header)
+        {
+            return header;
+        }
+
+        return Request.HasFormContentType ? (await Request.ReadFormAsync(Context.RequestAborted))[CsrfCookieName].ToString() : null;
     }
 
     protected override async Task HandleChallengeAsync(AuthenticationProperties properties)

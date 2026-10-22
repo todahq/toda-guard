@@ -36,8 +36,9 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb) : GuardCon
     [HttpGet("~/connect/authorize")]
     [HttpPost("~/connect/authorize")]
     [AllowAnonymous]
-    // Reviewed (S4502): a decision is taken only from a POST, and the session that makes it someone's comes from the web
-    // app's SameSite=Lax cookie, which browsers don't send with another site's POST: that arrives signed out.
+    // Reviewed (S4502): a decision is taken only from a POST, and the session that makes it someone's comes from its
+    // SameSite=Lax cookie (ADR 0075), which browsers don't send with another site's POST, and with the session's
+    // anti-forgery value in the form; without both it arrives signed out.
 #pragma warning disable S4502
     [IgnoreAntiforgeryToken]
 #pragma warning restore S4502
@@ -46,7 +47,7 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb) : GuardCon
         OpenIddictRequest request = HttpContext.GetOpenIddictServerRequest()
             ?? throw new InvalidOperationException("The OpenIddict server request cannot be retrieved.");
         string query = QueryString.Create(request.GetParameters()
-            .Where(p => p.Key is not (DecisionParameter or AccessParameter))
+            .Where(p => p.Key is not (DecisionParameter or AccessParameter or WebSessionHandler.CsrfCookieName))
             .Select(p => new KeyValuePair<string, string?>(p.Key, p.Value.ToString()))).ToUriComponent();
 
         if (Acting.SubjectId is not { } accountId)
