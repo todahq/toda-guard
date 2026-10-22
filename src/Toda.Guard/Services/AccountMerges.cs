@@ -485,10 +485,10 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
 
 /// <summary>
 /// Platform's rows that name an account (ADR 0044): mail logged to it, the texts and templates it last changed, and since
-/// M7 and M8 its notices and notification choices, its channel addresses and git accounts, and what it ran or set up
-/// (AI and tool calls, scripts, skills, smart commits, jobs, backfills, connections, channels, repositories). Where both
-/// accounts have one of something there can be one of (a notice of an event, choices, an address on a channel), the
-/// survivor's stays.
+/// M7 and M8 its notices and notification choices, its channel addresses and git accounts, its phones (ADR 0062), and
+/// what it ran or set up (AI and tool calls, scripts, skills, smart commits, jobs, backfills, connections, channels,
+/// repositories). Where both accounts have one of something there can be one of (a notice of an event, choices, an
+/// address on a channel), the survivor's stays.
 /// </summary>
 internal static class PlatformMerge
 {
@@ -532,6 +532,19 @@ internal static class PlatformMerge
             """, ct);
         settings += await Run(db, $"""UPDATE platform.channel_addresses SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct);
 
+        // Phones (ADR 0062) go to the survivor; its address on the push channel is the survivor itself, so that's set too.
+        int devices = await Run(db, $"""UPDATE platform.devices SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct);
+        if (devices > 0)
+        {
+            DateTime now = DateTime.UtcNow;
+            string address = survivor.ToString();
+            await Run(db, $"""
+                INSERT INTO platform.channel_addresses ("AccountId", "Channel", "Address", "VerifiedAt", "CodeTries", "UpdatedAt")
+                VALUES ({survivor}, 'push', {address}, {now}, 0, {now})
+                ON CONFLICT ("AccountId", "Channel") DO UPDATE SET "Address" = EXCLUDED."Address", "VerifiedAt" = EXCLUDED."VerifiedAt", "UpdatedAt" = EXCLUDED."UpdatedAt"
+                """, ct);
+        }
+
         int activity = 0;
         foreach ((string table, string column) in Activity)
         {
@@ -548,6 +561,7 @@ internal static class PlatformMerge
             new("notices", notices),
             new("settings", settings),
             new("git", await Run(db, $"""UPDATE platform.git_accounts SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct)),
+            new("devices", devices),
             new("activity", activity),
         ];
     }
@@ -571,6 +585,7 @@ internal static class PlatformMerge
             new("settings", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.notification_settings WHERE "AccountId" = {source}""", ct)
                 + await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.channel_addresses WHERE "AccountId" = {source}""", ct)),
             new("git", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.git_accounts WHERE "AccountId" = {source}""", ct)),
+            new("devices", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.devices WHERE "AccountId" = {source}""", ct)),
             new("activity", activity),
         ];
     }
