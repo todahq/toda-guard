@@ -490,7 +490,7 @@ public class WebSession : Entity<Guid>
 
     /// <summary>
     /// Why it ended early: signed-out, step-up (too many wrong passwords), ended (from the person's list), everywhere (the
-    /// person signed out everywhere else), or locked (an admin locked the account).
+    /// person signed out everywhere else), locked (an admin locked the account), or merged (the account was merged into another).
     /// </summary>
     public string? RevokedReason { get; set; }
 

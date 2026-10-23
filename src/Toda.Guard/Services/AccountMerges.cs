@@ -440,6 +440,10 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, now).SetProperty(t => t.RevokedBy, actorId), ct)));
         await db.PersonalAccessTokens.Where(t => t.CreatedBy == source.Id).ExecuteUpdateAsync(s => s.SetProperty(t => t.CreatedBy, survivor.Id), ct);
         await db.PersonalAccessTokens.Where(t => t.RevokedBy == source.Id).ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedBy, survivor.Id), ct);
+
+        // And its browsers' sessions (ADR 0075), which a person signs in to again as the survivor.
+        await db.WebSessions.Where(s => s.AccountId == source.Id && s.RevokedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.RevokedAt, now).SetProperty(x => x.RevokedReason, "merged"), ct);
         await db.AccountEmails.Where(e => e.AddedBy == source.Id).ExecuteUpdateAsync(s => s.SetProperty(e => e.AddedBy, survivor.Id), ct);
         return counts;
     }
