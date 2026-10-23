@@ -251,6 +251,9 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
     /// <summary>Set by the phone app's handoff: the shell shows only the page, and talks to the app (ADR 0073, 0075).</summary>
     public const string EmbeddedCookieName = "toda_embedded";
 
+    /// <summary>The web's chosen language (web/i18n/config.ts), which the server reads too (ADR 0026).</summary>
+    public const string LanguageCookieName = "NEXT_LOCALE";
+
     /// <summary>The session's id (OpenID Connect's claim), so the person's list can say which session is this one.</summary>
     public const string SessionIdClaim = "sid";
 
@@ -342,6 +345,11 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
             http.Response.Cookies.Delete(EmbeddedCookieName, new CookieOptions { Secure = secure, SameSite = SameSiteMode.Lax, Path = "/" });
         }
     }
+
+    /// <summary>The language the shell shows in, as its language switcher would set it; for as long as the browser stays open.</summary>
+    public static void IssueLanguage(HttpContext http, string language) =>
+        http.Response.Cookies.Append(LanguageCookieName, language,
+            new CookieOptions { Secure = IsHttps(http.Request), SameSite = SameSiteMode.Lax, Path = "/", IsEssential = true });
 
     public static void Clear(HttpContext http)
     {

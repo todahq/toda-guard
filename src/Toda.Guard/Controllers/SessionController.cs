@@ -142,13 +142,14 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
 
     /// <summary>
     /// The web view opens this with the app's code. The code is taken (once), a session starts for the web view, tied to
-    /// the app's sign-in, and the browser goes on to <c>next</c> with the shell embedded. A used, unknown or old code goes
-    /// to the sign-in page instead. The code is in an address only for these seconds: the answer is a redirect that sends
-    /// no referrer and isn't kept.
+    /// the app's sign-in, and the browser goes on to <c>next</c> with the shell embedded, in the app's language
+    /// (<c>lang</c>) when it says one. A used, unknown or old code goes to the sign-in page instead. The code is in an
+    /// address only for these seconds: the answer is a redirect that sends no referrer and isn't kept.
     /// </summary>
     [HttpGet("handoff")]
     [AllowAnonymous]
-    public async Task<IActionResult> TakeHandoff([FromQuery] string? code, [FromQuery] string? next, CancellationToken cancellationToken)
+    public async Task<IActionResult> TakeHandoff([FromQuery] string? code, [FromQuery] string? next, [FromQuery] string? lang,
+        CancellationToken cancellationToken)
     {
         Response.Headers["Referrer-Policy"] = "no-referrer";
         Response.Headers.CacheControl = "no-store";
@@ -168,6 +169,12 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
         (_, string secret) = await sessions.StartAsync(handoff.AccountId, Request.Headers.UserAgent.ToString(), ClientIp, handoff.AuthorizationId, handoff.AuthTime,
             cancellationToken);
         WebSessionHandler.Issue(HttpContext, secret, embedded: true);
+        // A language tag ("ar", "pt-BR"); the web matches it against the site's languages, as it does its switcher's.
+        if (lang is { Length: > 0 and <= 35 } && lang.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
+        {
+            WebSessionHandler.IssueLanguage(HttpContext, lang);
+        }
+
         return Redirect(target);
     }
 
