@@ -248,7 +248,8 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
             builder.AddRange(grantRules, scope);
         }
 
-        return builder.Build();    }
+        return RuleMerging.Merged(builder.Build());
+    }
 
     /// <summary>
     /// A rule narrowed to reading: its actions become "read" when it allows (or denies) reading or managing; any other
