@@ -99,6 +99,12 @@ public class WebSessionTests
         WebSessionHandler.Issue(https, Secret);
         Assert.All(https.Response.Headers.SetCookie.ToArray(), c => Assert.Contains("secure", c!, StringComparison.OrdinalIgnoreCase));
 
+        // TLS ended at the ingress: the gateway passes on the ingress's X-Forwarded-Proto.
+        DefaultHttpContext proxied = new();
+        proxied.Request.Headers["X-Forwarded-Proto"] = "https";
+        WebSessionHandler.Issue(proxied, Secret);
+        Assert.All(proxied.Response.Headers.SetCookie.ToArray(), c => Assert.Contains("secure", c!, StringComparison.OrdinalIgnoreCase));
+
         DefaultHttpContext cleared = new();
         WebSessionHandler.Clear(cleared);
         Assert.Equal(3, cleared.Response.Headers.SetCookie.Count);
