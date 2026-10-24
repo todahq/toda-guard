@@ -400,17 +400,15 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
 
 /// <summary>
 /// Limits what anyone can ask of the sign-up and reset endpoints from one address: 10 an action in 15 minutes, and 3 mails
-/// to one email address an hour. In memory, per node, like the sign-in limiter.
+/// to one email address an hour. Counted for the whole site (<see cref="SiteLimits"/>), like the sign-in limiter.
 /// </summary>
-public class SelfServiceLimiter : ISingletonDependency
+public class SelfServiceLimiter(SiteLimits limits) : ISingletonDependency
 {
-    private readonly SlidingWindows _hits = new();
-
-    public bool Allow(string action, string? ip, string? email)
+    public async Task<bool> AllowAsync(string action, string? ip, string? email, CancellationToken cancellationToken = default)
     {
-        DateTime now = DateTime.UtcNow;
-        bool byAddress = _hits.TryTake($"{action}|ip|{ip}", 10, TimeSpan.FromMinutes(15), now);
-        bool byEmail = email is null || _hits.TryTake($"{action}|mail|{GuardConstants.Normalize(email)}", 3, TimeSpan.FromHours(1), now);
+        bool byAddress = await limits.TryTakeAsync($"self-service|{action}|ip|{ip}", 10, TimeSpan.FromMinutes(15), cancellationToken);
+        bool byEmail = email is null
+            || await limits.TryTakeAsync($"self-service|{action}|mail|{GuardConstants.Normalize(email)}", 3, TimeSpan.FromHours(1), cancellationToken);
         return byAddress && byEmail;
     }
 }

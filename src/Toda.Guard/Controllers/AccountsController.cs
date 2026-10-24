@@ -313,10 +313,10 @@ public class MyEmailsController(AccountEmailService emails, SelfServiceLimiter l
     [HttpPost("me/emails")]
     [StepUp]
     [Authorize]
-    public Task<AccountEmailsDto> Add([FromBody] AddEmailInput input, CancellationToken cancellationToken)
+    public async Task<AccountEmailsDto> Add([FromBody] AddEmailInput input, CancellationToken cancellationToken)
     {
-        Limit("email-add", input.Email);
-        return emails.AddForSelfAsync(CurrentAccountId, input.Email, cancellationToken);
+        await LimitAsync("email-add", input.Email, cancellationToken);
+        return await emails.AddForSelfAsync(CurrentAccountId, input.Email, cancellationToken);
     }
 
     [HttpDelete("me/emails/{emailId:guid}")]
@@ -334,14 +334,14 @@ public class MyEmailsController(AccountEmailService emails, SelfServiceLimiter l
     [HttpPost("emails/verify")]
     public async Task<object> Verify([FromBody] TokenInput input, CancellationToken cancellationToken)
     {
-        Limit("email-verify", null);
+        await LimitAsync("email-verify", null, cancellationToken);
         (string email, string username) = await emails.VerifyAsync(input.Token, cancellationToken);
         return new { email, username };
     }
 
-    private void Limit(string action, string? email)
+    private async Task LimitAsync(string action, string? email, CancellationToken cancellationToken)
     {
-        if (!limiter.Allow(action, HttpContext.Connection.RemoteIpAddress?.ToString(), email))
+        if (!await limiter.AllowAsync(action, HttpContext.Connection.RemoteIpAddress?.ToString(), email, cancellationToken))
         {
             throw new UserFriendlyException("Too many tries. Wait a while and try again.", Toda.Platform.TodaErrorCodes.TooManyRequests);
         }

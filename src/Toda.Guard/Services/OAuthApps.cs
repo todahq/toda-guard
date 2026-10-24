@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
@@ -60,9 +59,8 @@ public static class OAuthAgents
 /// for other systems, public or confidential. A person sees and revokes the apps they've allowed.
 /// </summary>
 public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenIddictAuthorizationManager authorizations, IOpenIddictTokenManager tokens,
-    ISecurityAudit audit) : ITransientDependency
+    ISecurityAudit audit, Toda.Platform.Limits.SiteLimits limits) : ITransientDependency
 {
-    private static readonly ConcurrentDictionary<string, (int Count, DateTime Since)> Registrations = new();
     private const int RegistrationsPerHour = 20;
 
     /// <summary>
@@ -71,10 +69,8 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
     /// </summary>
     public async Task<OAuthAppDto> RegisterAsync(ClientRegistrationInput input, string? ip, CancellationToken cancellationToken)
     {
-        string from = ip ?? "unknown";
-        (int count, DateTime since) = Registrations.AddOrUpdate(from, _ => (1, DateTime.UtcNow),
-            (_, v) => DateTime.UtcNow - v.Since > TimeSpan.FromHours(1) ? (1, DateTime.UtcNow) : (v.Count + 1, v.Since));
-        if (count > RegistrationsPerHour)
+        // Counted for the whole site, so several servers allow no more than one.
+        if (!await limits.TryTakeAsync($"mcp-register|{ip ?? "unknown"}", RegistrationsPerHour, TimeSpan.FromHours(1), cancellationToken))
         {
             throw new BusinessException("too_many_registrations", "Too many registrations from here; try again in an hour.");
         }

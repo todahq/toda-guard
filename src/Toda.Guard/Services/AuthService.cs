@@ -8,30 +8,29 @@ using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
 
-/// <summary>Brute-force limit per username and per IP: 5 failures in 15 minutes blocks for 15 minutes.</summary>
-public class LoginRateLimiter : ISingletonDependency
+/// <summary>
+/// Brute-force limit per username and per IP: 5 failures in 15 minutes blocks for 15 minutes (20 per IP). Counted for
+/// the whole site (<see cref="SiteLimits"/>), so several servers allow no more than one.
+/// </summary>
+public class LoginRateLimiter(SiteLimits limits) : ISingletonDependency
 {
     private const int MaxFailures = 5;
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(15);
-    private readonly SlidingWindows _failures = new();
 
-    public bool IsBlocked(string username, string? ip)
-    {
-        DateTime now = DateTime.UtcNow;
-        return _failures.Count($"u:{username}", Window, now) >= MaxFailures || (ip is not null && _failures.Count($"ip:{ip}", Window, now) >= MaxFailures * 4);
-    }
+    public async Task<bool> IsBlockedAsync(string username, string? ip, CancellationToken cancellationToken = default) =>
+        await limits.CountAsync($"sign-in|u:{username}", Window, cancellationToken) >= MaxFailures
+        || (ip is not null && await limits.CountAsync($"sign-in|ip:{ip}", Window, cancellationToken) >= MaxFailures * 4);
 
-    public void RecordFailure(string username, string? ip)
+    public async Task RecordFailureAsync(string username, string? ip, CancellationToken cancellationToken = default)
     {
-        DateTime now = DateTime.UtcNow;
-        _failures.Add($"u:{username}", now);
+        await limits.AddAsync($"sign-in|u:{username}", cancellationToken);
         if (ip is not null)
         {
-            _failures.Add($"ip:{ip}", now);
+            await limits.AddAsync($"sign-in|ip:{ip}", cancellationToken);
         }
     }
 
-    public void Reset(string username) => _failures.Reset($"u:{username}");
+    public Task ResetAsync(string username, CancellationToken cancellationToken = default) => limits.ResetAsync($"sign-in|u:{username}", cancellationToken);
 }
 
 /// <summary>Credential check only. Tokens are issued by the OpenIddict token endpoint (ADR 0007).</summary>
@@ -53,7 +52,7 @@ public class AuthService(
     public async Task<LoginResult> LoginAsync(string username, string password, string? ip, CancellationToken cancellationToken = default)
     {
         string normalized = GuardConstants.Normalize(username);
-        if (limiter.IsBlocked(normalized, ip))
+        if (await limiter.IsBlockedAsync(normalized, ip, cancellationToken))
         {
             await AuditAsync("auth.login.blocked", normalized, null, "Too many failed attempts", ip, cancellationToken);
             return new LoginResult(false, null, "too_many_attempts");
@@ -99,7 +98,7 @@ public class AuthService(
             // Account-state failures don't count toward the brute-force limit; wrong passwords do.
             if (reason is "wrong_password" or "user_not_found" or "invalid_credentials")
             {
-                limiter.RecordFailure(normalized, ip);
+                await limiter.RecordFailureAsync(normalized, ip, cancellationToken);
             }
 
             await AuditAsync("auth.login.failed", normalized, account?.Id, reason, ip, cancellationToken);
@@ -108,7 +107,7 @@ public class AuthService(
                 : new LoginResult(false, null, "invalid_credentials");
         }
 
-        limiter.Reset(normalized);
+        await limiter.ResetAsync(normalized, cancellationToken);
         await AuditAsync("auth.login.succeeded", normalized, account!.Id, null, ip, cancellationToken);
         return new LoginResult(true, account, null);
     }
@@ -142,23 +141,26 @@ public class AuthService(
                 return (account, "account_inactive");
             }
 
-            return (account, limiter.IsBlocked(account.NormalizedUsername, ip) ? "too_many_attempts" : await CheckPasswordAsync(db, account, password, cancellationToken));
+            return (account, await limiter.IsBlockedAsync(account.NormalizedUsername, ip, cancellationToken)
+                ? "too_many_attempts"
+                : await CheckPasswordAsync(db, account, password, cancellationToken));
         }, cancellationToken: cancellationToken);
 
         string? username = account?.NormalizedUsername;
         if (refused is null)
         {
-            limiter.Reset(username!);
+            await limiter.ResetAsync(username!, cancellationToken);
             await AuditAsync(SecurityAuditTypes.StepUpSucceeded, username, accountId, null, ip, cancellationToken);
             return new StepUpResult(true, false);
         }
 
         if (username is not null && refused is "wrong_password" or "invalid_credentials")
         {
-            limiter.RecordFailure(username, ip);
+            await limiter.RecordFailureAsync(username, ip, cancellationToken);
         }
 
-        bool end = refused is "account_inactive" or "directory_inactive" or "directory_signin_disabled" || (username is not null && limiter.IsBlocked(username, ip));
+        bool end = refused is "account_inactive" or "directory_inactive" or "directory_signin_disabled"
+            || (username is not null && await limiter.IsBlockedAsync(username, ip, cancellationToken));
         await AuditAsync(end ? SecurityAuditTypes.StepUpEndedSession : SecurityAuditTypes.StepUpFailed, username, accountId, refused, ip, cancellationToken);
         return new StepUpResult(false, end);
     }

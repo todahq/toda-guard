@@ -40,7 +40,7 @@ public class SelfServiceController(SelfService self, SelfServiceLimiter limiter,
     [HttpPost("signup")]
     public async Task<NoContentResult> SignUp([FromBody] SignUpInput input, CancellationToken cancellationToken)
     {
-        Limit("signup", input.Email);
+        await LimitAsync("signup", input.Email, cancellationToken);
         if (!await captchas.VerifyAsync(input.Captcha, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken))
         {
             throw new UserFriendlyException("Answer the question that shows you're a person.");
@@ -55,7 +55,7 @@ public class SelfServiceController(SelfService self, SelfServiceLimiter limiter,
     [HttpPost("signup/verify")]
     public async Task<object> Verify([FromBody] TokenInput input, CancellationToken cancellationToken)
     {
-        Limit("verify", null);
+        await LimitAsync("verify", null, cancellationToken);
         (string username, List<object> events) = await self.VerifyAsync(input.Token, cancellationToken);
         await PublishAsync(events);
         return new { username };
@@ -66,7 +66,7 @@ public class SelfServiceController(SelfService self, SelfServiceLimiter limiter,
     [HttpPost("password/forgot")]
     public async Task<NoContentResult> Forgot([FromBody] ForgotPasswordInput input, CancellationToken cancellationToken)
     {
-        Limit("forgot", input.Email);
+        await LimitAsync("forgot", input.Email, cancellationToken);
         await self.ForgotAsync(input.Email, cancellationToken);
         return NoContent();
     }
@@ -76,13 +76,13 @@ public class SelfServiceController(SelfService self, SelfServiceLimiter limiter,
     [HttpPost("password/reset")]
     public async Task<object> Reset([FromBody] ResetPasswordInput input, CancellationToken cancellationToken)
     {
-        Limit("reset", null);
+        await LimitAsync("reset", null, cancellationToken);
         return new { username = await self.ResetAsync(input.Token, input.Password, cancellationToken) };
     }
 
-    private void Limit(string action, string? email)
+    private async Task LimitAsync(string action, string? email, CancellationToken cancellationToken)
     {
-        if (!limiter.Allow(action, HttpContext.Connection.RemoteIpAddress?.ToString(), email))
+        if (!await limiter.AllowAsync(action, HttpContext.Connection.RemoteIpAddress?.ToString(), email, cancellationToken))
         {
             throw new UserFriendlyException("Too many tries. Wait a while and try again.", TodaErrorCodes.TooManyRequests);
         }
