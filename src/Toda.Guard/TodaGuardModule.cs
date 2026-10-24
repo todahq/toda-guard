@@ -127,6 +127,8 @@ public class TodaGuardModule : AbpModule
         // A bearer token is either an access token from the token endpoint (OpenIddict) or a personal access token (M7). A
         // request without one is a browser's, signed in by its session cookie (ADR 0075).
         context.Services.AddMemoryCache();
+        // A session ended or stepped up on another server is forgotten here at once (docs/ha.md step 2).
+        context.Services.AddSingleton<Toda.Platform.Changes.IChangeHandler, Services.WebSessionChanged>();
         context.Services.AddAuthentication(TodaBearer)
             .AddPolicyScheme(TodaBearer, null, options => options.ForwardDefaultSelector = http => SchemeFor(http.Request))
             .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, PersonalTokenHandler>(PersonalTokenHandler.SchemeName, null)

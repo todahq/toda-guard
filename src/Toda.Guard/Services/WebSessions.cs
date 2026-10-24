@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Toda.Guard.Domain;
 using Toda.Platform.Acting;
+using Toda.Platform.Changes;
 using OpenIddict.Abstractions;
 using Volo.Abp.DependencyInjection;
 
@@ -21,9 +22,10 @@ public sealed record WebSessionInfo(Guid Id, Guid AccountId, string Username, st
 /// <summary>
 /// The web's sessions (ADR 0075): started by signing in, found by the cookie's secret, slid on as they're used, marked by
 /// a step-up, and ended. A found session is kept in memory for a few seconds, so most requests don't read the table; an
-/// ended one stops working at once on this server, and within those seconds on the others.
+/// ended or stepped-up one is forgotten at once on this server, and on the others as soon as they're told
+/// (<see cref="WebSessionChanged"/>), at worst within those seconds.
 /// </summary>
-public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthorizationManager authorizations) : ITransientDependency
+public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthorizationManager authorizations, ChangeNotices changes) : ITransientDependency
 {
     /// <summary>How long a session lives unused; each use pushes its end on (as the web's refresh tokens did, ADR 0007).</summary>
     public static readonly TimeSpan Lifetime = TimeSpan.FromDays(14);
@@ -129,7 +131,7 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthori
             session.RevokedAt = DateTime.UtcNow;
             session.RevokedReason = reason;
             await db.SaveChangesAsync(cancellationToken);
-            cache.Remove(Key(session.TokenHash));
+            Forget(session.TokenHash);
         }, requiresNew: true, cancellationToken);
 
     /// <summary>
@@ -160,10 +162,20 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthori
         }, requiresNew: true, cancellationToken);
         foreach (string hash in ended)
         {
-            cache.Remove(Key(hash));
+            Forget(hash);
         }
 
         return ended.Count;
+    }
+
+    /// <summary>
+    /// Drops this server's remembered check of a session that ended or stepped up, and has the other servers drop theirs
+    /// (docs/ha.md step 2), so it holds everywhere at once rather than within <see cref="Remembered"/>.
+    /// </summary>
+    private void Forget(string hash)
+    {
+        cache.Remove(Key(hash));
+        changes.Notify(ChangeTopics.WebSession, hash);
     }
 
     /// <summary>A step-up passed (ADR 0042): the session says the person proved who they are just now. Null when it has ended.</summary>
@@ -178,7 +190,7 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthori
 
             session.AuthTime = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
-            cache.Remove(Key(session.TokenHash));
+            Forget(session.TokenHash);
             return session.AuthTime;
         }, requiresNew: true, cancellationToken);
 
@@ -230,7 +242,7 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthori
         await guardDb.RunAsync(db => db.SessionHandoffs.Where(h => h.ExpiresAt < dayAgo).ExecuteDeleteAsync(cancellationToken), requiresNew: true, cancellationToken: cancellationToken);
     }
 
-    private static string Key(string hash) => "toda:web-session:" + hash;
+    internal static string Key(string hash) => "toda:web-session:" + hash;
 
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }
