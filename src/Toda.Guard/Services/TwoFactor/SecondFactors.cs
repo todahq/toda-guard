@@ -231,15 +231,20 @@ public sealed class SecondFactors(
     {
         SecondFactorEnrolledDto? done = await guardDb.RunAsync<SecondFactorEnrolledDto?>(async db =>
         {
-            SecondFactor? pending = await db.SecondFactors
+            // The one the code matches: two starts close together (a page loaded twice) can leave two being set up.
+            List<SecondFactor> started = await db.SecondFactors
                 .Where(f => f.AccountId == accountId && f.Kind == SecondFactorKinds.App && f.ConfirmedAt == null).OrderByDescending(f => f.CreatedAt)
-                .FirstOrDefaultAsync(cancellationToken);
+                .ToListAsync(cancellationToken);
             DateTime now = DateTime.UtcNow;
-            if (pending?.ProtectedSecret is null || Totp.Verify(Totp.FromBase32(Protector.Unprotect(pending.ProtectedSecret)), code, now, 0) is not { } step)
+            (SecondFactor? pending, long step) = started
+                .Select(f => (f, step: f.ProtectedSecret is { } secret ? Totp.Verify(Totp.FromBase32(Protector.Unprotect(secret)), code, now, 0) : null))
+                .Where(x => x.step is not null).Select(x => (x.f, x.step!.Value)).FirstOrDefault();
+            if (pending is null)
             {
                 return null;
             }
 
+            db.SecondFactors.RemoveRange(started.Where(f => f != pending));
             (pending.ConfirmedAt, pending.LastStep, pending.LastUsedAt) = (now, step, now);
             List<string>? codes = await db.RecoveryCodes.AnyAsync(c => c.AccountId == accountId && c.UsedAt == null, cancellationToken)
                 ? null
