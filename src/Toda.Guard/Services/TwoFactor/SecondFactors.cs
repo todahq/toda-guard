@@ -1,0 +1,420 @@
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Toda.Guard.Data;
+using Toda.Guard.Domain;
+using Toda.Platform.Acting;
+using Toda.Platform.Limits;
+using QRCoder;
+using Volo.Abp;
+using Volo.Abp.DependencyInjection;
+
+namespace Toda.Guard.Services.TwoFactor;
+
+/// <summary>A password that was right but isn't enough (ADR 0082): the ticket for the second step, and what it may be.</summary>
+/// <param name="Ticket">Good once, for five minutes and five tries.</param>
+/// <param name="Methods">The person's methods that the step takes (<c>app</c>); empty when <paramref name="Enrol"/>.</param>
+/// <param name="Enrol">The person has none yet and must set one up with the ticket first.</param>
+/// <param name="Strong">Only a strong method will do (the app), as one of their groups asks.</param>
+public sealed record SecondFactorChallengeDto(string Ticket, List<string> Methods, bool Enrol, bool Strong, DateTime ExpiresAt);
+
+/// <summary>Setting up the authenticator app: the secret (to type in), the address and its QR code (a PNG data URL).</summary>
+public sealed record AppEnrolmentDto(string Secret, string Address, string Qr);
+
+/// <summary>A second factor set up; the recovery codes when they were made now, shown this once.</summary>
+public sealed record SecondFactorEnrolledDto(List<string>? RecoveryCodes);
+
+public sealed record SecondFactorDto(Guid Id, string Kind, DateTime CreatedAt, DateTime? LastUsedAt);
+
+/// <summary>A person's second factors: what their groups ask (<see cref="TwoFactorModes"/>), what they have, the recovery codes left.</summary>
+public sealed record MySecondFactorsDto(string Mode, bool Asked, List<SecondFactorDto> Factors, int RecoveryCodesLeft, bool Disabled);
+
+/// <summary>A ticket's second step passed: who, for which client and scopes.</summary>
+public sealed record SecondStepPassed(Guid AccountId, string Client, string? Scopes);
+
+/// <summary>
+/// The second step's outcome: passed, or why not (<c>ticket_expired</c>: used, too old or out of tries, or another
+/// client's; <c>too_many_attempts</c>: too many wrong codes for the person; <c>second_factor_failed</c>: a wrong code).
+/// </summary>
+public sealed record SecondStepResult(SecondStepPassed? Passed, string? Error);
+
+/// <summary>
+/// A second factor (ADR 0082): which people are asked (the strictest mode of their groups, or having set one up), the
+/// tickets of the second step, the authenticator app and recovery codes, setting up, removing and an admin's reset. The
+/// app's secret is encrypted with the site's key ring; tickets and recovery codes are kept as their SHA-256. Wrong codes
+/// count for the whole site (<see cref="SiteLimits"/>), ten in 15 minutes per person, and five per ticket.
+/// <c>Guard:TwoFactor:Disabled</c> asks no one: the emergency switch, for a site whose admins all lost their phones.
+/// </summary>
+public sealed class SecondFactors(
+    GuardDb guardDb,
+    MembershipGraph graph,
+    IDataProtectionProvider protection,
+    SiteLimits limits,
+    SecurityLog audit,
+    IConfiguration configuration,
+    ILogger<SecondFactors> logger) : ITransientDependency
+{
+    public const int RecoveryCodeCount = 10;
+    private const int MaxWrongCodes = 10;
+    private static readonly TimeSpan WrongCodesWindow = TimeSpan.FromMinutes(15);
+    private const string RecoveryAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+    private IDataProtector Protector => protection.CreateProtector("Toda.Guard.SecondFactor.v1");
+
+    /// <summary>The emergency switch: nobody is asked for a second factor.</summary>
+    public bool Disabled => configuration.GetValue("Guard:TwoFactor:Disabled", false);
+
+    /// <summary>The strictest mode of every group the person is in, directly, nested or synced (ADR 0082).</summary>
+    public async Task<string> ModeAsync(GuardDbContext db, Account account, CancellationToken cancellationToken)
+    {
+        if (Disabled)
+        {
+            return TwoFactorModes.Off;
+        }
+
+        List<EffectiveGroup> groups = await graph.GetEffectiveGroupsAsync(db, account, cancellationToken);
+        return TwoFactorModes.Strictest(groups.Select(g => g.Group.TwoFactor));
+    }
+
+    /// <summary>
+    /// After a right password: null when no second step is asked, else a ticket for it. A person is asked when a group of
+    /// theirs requires it, or when they set a second factor up themselves.
+    /// </summary>
+    public Task<SecondFactorChallengeDto?> ChallengeAsync(Guid accountId, string client, string? scopes, string? ip, CancellationToken cancellationToken) =>
+        guardDb.RunAsync<SecondFactorChallengeDto?>(async db =>
+        {
+            Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == accountId, cancellationToken);
+            string mode = await ModeAsync(db, account, cancellationToken);
+            List<string> kinds = await db.SecondFactors.AsNoTracking().Where(f => f.AccountId == accountId && f.ConfirmedAt != null).Select(f => f.Kind)
+                .Distinct().ToListAsync(cancellationToken);
+            if (Disabled || (!TwoFactorModes.Asks(mode) && kinds.Count == 0))
+            {
+                return null;
+            }
+
+            bool strong = mode == TwoFactorModes.Strong;
+            List<string> methods = [.. kinds.Where(k => !strong || SecondFactorKinds.IsStrong(k)).Order(StringComparer.Ordinal)];
+            string ticket = Secret();
+            SignInTicket row = new(Guid.NewGuid(), accountId, Hash(ticket), client, scopes, ip);
+            db.SignInTickets.Add(row);
+            await db.SignInTickets.Where(t => t.ExpiresAt < DateTime.UtcNow).ExecuteDeleteAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            return new SecondFactorChallengeDto(ticket, methods, methods.Count == 0, strong, row.ExpiresAt);
+        }, requiresNew: true, cancellationToken);
+
+    /// <summary>
+    /// The second step: the ticket and a code of the method (the app, or a recovery code), or a ticket a second factor was
+    /// just set up with. Passed, the ticket is used up. Wrong, it's a try less; refused outright when the client isn't the
+    /// one that checked the password, or the person has had too many wrong codes.
+    /// </summary>
+    public async Task<SecondStepResult> PassAsync(string ticket, string? method, string? code, string client, string? ip, CancellationToken cancellationToken)
+    {
+        string hash = Hash(ticket);
+        (SecondStepPassed? passed, Guid? accountId, string? username, string? why) = await guardDb.RunAsync<(SecondStepPassed?, Guid?, string?, string?)>(async db =>
+        {
+            DateTime now = DateTime.UtcNow;
+            SignInTicket? row = await db.SignInTickets.FirstOrDefaultAsync(t => t.TicketHash == hash, cancellationToken);
+            if (row is null || !row.Usable(now) || row.Client != client)
+            {
+                return (null, row?.AccountId, null, "ticket");
+            }
+
+            Account? account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == row.AccountId, cancellationToken);
+            if (account is null || account.Status != AccountStatus.Active)
+            {
+                db.SignInTickets.Remove(row);
+                await db.SaveChangesAsync(cancellationToken);
+                return (null, row.AccountId, account?.Username, "account");
+            }
+
+            if (row.ProvedAt is null)
+            {
+                if (await limits.CountAsync(WrongKey(account.Id), WrongCodesWindow, cancellationToken) >= MaxWrongCodes)
+                {
+                    return (null, account.Id, account.Username, "blocked");
+                }
+
+                bool strong = await ModeAsync(db, account, cancellationToken) == TwoFactorModes.Strong;
+                if (!await CheckCodeAsync(db, account.Id, method, code, strong, now, cancellationToken))
+                {
+                    row.Attempts++;
+                    await db.SaveChangesAsync(cancellationToken);
+                    await limits.AddAsync(WrongKey(account.Id), cancellationToken);
+                    return (null, account.Id, account.Username, "code");
+                }
+            }
+
+            db.SignInTickets.Remove(row);
+            await db.SaveChangesAsync(cancellationToken);
+            return (new SecondStepPassed(account.Id, row.Client, row.Scopes), account.Id, account.Username, null);
+        }, requiresNew: true, cancellationToken);
+
+        await audit.WriteAsync(passed is null ? SecurityAuditTypes.SecondFactorFailed : SecurityAuditTypes.SecondFactorSucceeded, username, accountId,
+            passed is null ? why : method, ip, cancellationToken);
+        return new SecondStepResult(passed, passed is not null ? null : why switch
+        {
+            "blocked" => "too_many_attempts",
+            "code" => "second_factor_failed",
+            _ => "ticket_expired",
+        });
+    }
+
+    /// <summary>
+    /// A step-up's second factor, after the right password: null when it passes (the person has none, or the code is
+    /// right), else <c>second_factor_required</c> (no code), <c>second_factor_failed</c> or <c>too_many_attempts</c>.
+    /// Wrong codes count with the sign-in's, so a session and a password can't be used to guess them.
+    /// </summary>
+    public async Task<string?> StepUpErrorAsync(Guid accountId, string? method, string? code, string? ip, CancellationToken cancellationToken)
+    {
+        (string? error, string? username) = await guardDb.RunAsync<(string?, string?)>(async db =>
+        {
+            if (Disabled || !await db.SecondFactors.AnyAsync(f => f.AccountId == accountId && f.ConfirmedAt != null, cancellationToken))
+            {
+                return (null, null);
+            }
+
+            Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == accountId, cancellationToken);
+            if (code is not { Length: > 0 })
+            {
+                return ("second_factor_required", account.Username);
+            }
+
+            if (await limits.CountAsync(WrongKey(accountId), WrongCodesWindow, cancellationToken) >= MaxWrongCodes)
+            {
+                return ("too_many_attempts", account.Username);
+            }
+
+            bool strong = await ModeAsync(db, account, cancellationToken) == TwoFactorModes.Strong;
+            if (await CheckCodeAsync(db, accountId, method, code, strong, DateTime.UtcNow, cancellationToken))
+            {
+                return (null, account.Username);
+            }
+
+            await limits.AddAsync(WrongKey(accountId), cancellationToken);
+            return ("second_factor_failed", account.Username);
+        }, requiresNew: true, cancellationToken);
+
+        if (error is "second_factor_failed" or "too_many_attempts")
+        {
+            await audit.WriteAsync(SecurityAuditTypes.SecondFactorFailed, username, accountId, "step-up", ip, cancellationToken);
+        }
+
+        return error;
+    }
+
+    /// <summary>Whether the person has a second factor set up (a step-up then asks for a code too).</summary>
+    public Task<bool> HasAsync(Guid accountId, CancellationToken cancellationToken) =>
+        Disabled ? Task.FromResult(false) : guardDb.RunAsync(db => db.SecondFactors.AnyAsync(f => f.AccountId == accountId && f.ConfirmedAt != null, cancellationToken),
+            cancellationToken: cancellationToken);
+
+    /// <summary>Starts setting up the authenticator app: a new secret, kept until its first code is right.</summary>
+    public Task<AppEnrolmentDto> StartAppAsync(Guid accountId, CancellationToken cancellationToken) =>
+        guardDb.RunAsync(async db =>
+        {
+            Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == accountId, cancellationToken);
+            await db.SecondFactors.Where(f => f.AccountId == accountId && f.Kind == SecondFactorKinds.App && f.ConfirmedAt == null).ExecuteDeleteAsync(cancellationToken);
+            byte[] secret = Totp.NewSecret();
+            db.SecondFactors.Add(new SecondFactor(Guid.NewGuid(), accountId, SecondFactorKinds.App, Protector.Protect(Totp.ToBase32(secret))));
+            await db.SaveChangesAsync(cancellationToken);
+            string address = Totp.Address(Issuer, account.Username, secret);
+            return new AppEnrolmentDto(Totp.ToBase32(secret), address, QrPng(address));
+        }, requiresNew: true, cancellationToken);
+
+    /// <summary>
+    /// Finishes setting up the app with its first code. The first second factor comes with ten recovery codes, shown once;
+    /// null when the code is wrong.
+    /// </summary>
+    public async Task<SecondFactorEnrolledDto?> FinishAppAsync(Guid accountId, string? code, CancellationToken cancellationToken)
+    {
+        SecondFactorEnrolledDto? done = await guardDb.RunAsync<SecondFactorEnrolledDto?>(async db =>
+        {
+            SecondFactor? pending = await db.SecondFactors
+                .Where(f => f.AccountId == accountId && f.Kind == SecondFactorKinds.App && f.ConfirmedAt == null).OrderByDescending(f => f.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+            DateTime now = DateTime.UtcNow;
+            if (pending?.ProtectedSecret is null || Totp.Verify(Totp.FromBase32(Protector.Unprotect(pending.ProtectedSecret)), code, now, 0) is not { } step)
+            {
+                return null;
+            }
+
+            (pending.ConfirmedAt, pending.LastStep, pending.LastUsedAt) = (now, step, now);
+            List<string>? codes = await db.RecoveryCodes.AnyAsync(c => c.AccountId == accountId && c.UsedAt == null, cancellationToken)
+                ? null
+                : await NewRecoveryCodesAsync(db, accountId, cancellationToken);
+            audit.Add(db, SecurityAuditTypes.SecondFactorAdded, new AuditTarget("Account", accountId, null), new { kind = SecondFactorKinds.App });
+            await db.SaveChangesAsync(cancellationToken);
+            return new SecondFactorEnrolledDto(codes);
+        }, requiresNew: true, cancellationToken);
+        return done;
+    }
+
+    /// <summary>
+    /// The account a ticket may set up a second factor for; null when it can't: used, expired, out of tries, or the person
+    /// has one already (the ticket would otherwise pass the step without it).
+    /// </summary>
+    public Task<Guid?> TicketAccountAsync(string ticket, CancellationToken cancellationToken)
+    {
+        string hash = Hash(ticket);
+        DateTime now = DateTime.UtcNow;
+        return guardDb.RunAsync(async db =>
+        {
+            var row = await db.SignInTickets.AsNoTracking().Where(t => t.TicketHash == hash).Select(t => new { t.AccountId, t.ExpiresAt, t.Attempts, t.ProvedAt })
+                .FirstOrDefaultAsync(cancellationToken);
+            return row is not null && row.ExpiresAt > now && row.Attempts < SignInTicket.MaxAttempts && row.ProvedAt is null
+                && !await db.SecondFactors.AnyAsync(f => f.AccountId == row.AccountId && f.ConfirmedAt != null, cancellationToken)
+                ? row.AccountId
+                : (Guid?)null;
+        }, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>A second factor was set up with this ticket: the step is proved, and the next exchange needs no code.</summary>
+    public Task ProveTicketAsync(string ticket, CancellationToken cancellationToken) =>
+        guardDb.RunAsync(async db =>
+        {
+            string hash = Hash(ticket);
+            await db.SignInTickets.Where(t => t.TicketHash == hash).ExecuteUpdateAsync(u => u.SetProperty(t => t.ProvedAt, DateTime.UtcNow), cancellationToken);
+        }, requiresNew: true, cancellationToken);
+
+    /// <summary>A wrong code while setting up with a ticket: a try less.</summary>
+    public Task SpendTicketTryAsync(string ticket, CancellationToken cancellationToken) =>
+        guardDb.RunAsync(async db =>
+        {
+            string hash = Hash(ticket);
+            await db.SignInTickets.Where(t => t.TicketHash == hash).ExecuteUpdateAsync(u => u.SetProperty(t => t.Attempts, t => t.Attempts + 1), cancellationToken);
+        }, requiresNew: true, cancellationToken);
+
+    public Task<MySecondFactorsDto> ListAsync(Guid accountId, CancellationToken cancellationToken) =>
+        guardDb.RunAsync(async db =>
+        {
+            Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == accountId, cancellationToken);
+            string mode = await ModeAsync(db, account, cancellationToken);
+            List<SecondFactorDto> factors = await db.SecondFactors.AsNoTracking().Where(f => f.AccountId == accountId && f.ConfirmedAt != null)
+                .OrderBy(f => f.CreatedAt).Select(f => new SecondFactorDto(f.Id, f.Kind, f.CreatedAt, f.LastUsedAt)).ToListAsync(cancellationToken);
+            int left = await db.RecoveryCodes.CountAsync(c => c.AccountId == accountId && c.UsedAt == null, cancellationToken);
+            return new MySecondFactorsDto(mode, !Disabled && (TwoFactorModes.Asks(mode) || factors.Count > 0), factors, left, Disabled);
+        }, cancellationToken: cancellationToken);
+
+    /// <summary>Removes one of the person's second factors; not the last one while a group of theirs requires one.</summary>
+    public Task RemoveAsync(Guid accountId, Guid factorId, CancellationToken cancellationToken) =>
+        guardDb.RunAsync(async db =>
+        {
+            SecondFactor factor = await db.SecondFactors.FirstOrDefaultAsync(f => f.Id == factorId && f.AccountId == accountId, cancellationToken)
+                ?? throw new Volo.Abp.Domain.Entities.EntityNotFoundException(typeof(SecondFactor), factorId);
+            Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == accountId, cancellationToken);
+            bool last = !await db.SecondFactors.AnyAsync(f => f.AccountId == accountId && f.Id != factorId && f.ConfirmedAt != null, cancellationToken);
+            if (last && TwoFactorModes.Asks(await ModeAsync(db, account, cancellationToken)))
+            {
+                throw new UserFriendlyException("A group you're in requires a second factor: set up another one before removing this.");
+            }
+
+            db.SecondFactors.Remove(factor);
+            if (last)
+            {
+                await db.RecoveryCodes.Where(c => c.AccountId == accountId).ExecuteDeleteAsync(cancellationToken);
+            }
+
+            audit.Add(db, SecurityAuditTypes.SecondFactorRemoved, new AuditTarget("Account", accountId, account.Username), new { kind = factor.Kind });
+            await db.SaveChangesAsync(cancellationToken);
+        }, requiresNew: true, cancellationToken);
+
+    /// <summary>Ten new recovery codes in place of the old ones, shown this once.</summary>
+    public Task<List<string>> RenewRecoveryCodesAsync(Guid accountId, CancellationToken cancellationToken) =>
+        guardDb.RunAsync(async db =>
+        {
+            if (!await db.SecondFactors.AnyAsync(f => f.AccountId == accountId && f.ConfirmedAt != null, cancellationToken))
+            {
+                throw new UserFriendlyException("Set up a second factor first: recovery codes stand in for it.");
+            }
+
+            List<string> codes = await NewRecoveryCodesAsync(db, accountId, cancellationToken);
+            audit.Add(db, SecurityAuditTypes.RecoveryCodesRenewed, new AuditTarget("Account", accountId, null));
+            await db.SaveChangesAsync(cancellationToken);
+            return codes;
+        }, requiresNew: true, cancellationToken);
+
+    /// <summary>An admin's reset: every second factor and recovery code of the person goes; their groups may ask them to set one up again.</summary>
+    public Task ResetAsync(Guid accountId, CancellationToken cancellationToken) =>
+        guardDb.RunAsync(async db =>
+        {
+            Account account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId, cancellationToken)
+                ?? throw new Volo.Abp.Domain.Entities.EntityNotFoundException(typeof(Account), accountId);
+            int removed = await db.SecondFactors.Where(f => f.AccountId == accountId).ExecuteDeleteAsync(cancellationToken);
+            await db.RecoveryCodes.Where(c => c.AccountId == accountId).ExecuteDeleteAsync(cancellationToken);
+            audit.Add(db, SecurityAuditTypes.SecondFactorReset, new AuditTarget("Account", accountId, account.Username), new { removed });
+            await db.SaveChangesAsync(cancellationToken);
+            logger.LogInformation("An admin reset the second factors of {Username}", account.Username);
+        }, requiresNew: true, cancellationToken);
+
+    /// <summary>A code of the method: one of the person's app factors (each code once), or an unused recovery code (once).</summary>
+    private async Task<bool> CheckCodeAsync(GuardDbContext db, Guid accountId, string? method, string? code, bool strong, DateTime now, CancellationToken cancellationToken)
+    {
+        if (method == SecondFactorKinds.Recovery)
+        {
+            string hash = Hash(NormalizeRecovery(code));
+            RecoveryCode? recovery = await db.RecoveryCodes.FirstOrDefaultAsync(c => c.AccountId == accountId && c.UsedAt == null && c.Hash == hash, cancellationToken);
+            if (recovery is null)
+            {
+                return false;
+            }
+
+            recovery.UsedAt = now;
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
+        if (method != SecondFactorKinds.App || (strong && !SecondFactorKinds.IsStrong(method)))
+        {
+            return false;
+        }
+
+        foreach (SecondFactor factor in await db.SecondFactors.Where(f => f.AccountId == accountId && f.Kind == SecondFactorKinds.App && f.ConfirmedAt != null)
+                     .ToListAsync(cancellationToken))
+        {
+            if (factor.ProtectedSecret is { } secret && Totp.Verify(Totp.FromBase32(Protector.Unprotect(secret)), code, now, factor.LastStep) is { } step)
+            {
+                (factor.LastStep, factor.LastUsedAt) = (step, now);
+                await db.SaveChangesAsync(cancellationToken);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task<List<string>> NewRecoveryCodesAsync(GuardDbContext db, Guid accountId, CancellationToken cancellationToken)
+    {
+        await db.RecoveryCodes.Where(c => c.AccountId == accountId).ExecuteDeleteAsync(cancellationToken);
+        List<string> codes = [];
+        for (int i = 0; i < RecoveryCodeCount; i++)
+        {
+            string code = $"{Block(5)}-{Block(5)}";
+            codes.Add(code);
+            db.RecoveryCodes.Add(new RecoveryCode(Guid.NewGuid(), accountId, Hash(NormalizeRecovery(code))));
+        }
+
+        return codes;
+    }
+
+    private static string Block(int length) => new([.. Enumerable.Range(0, length).Select(_ => RecoveryAlphabet[RandomNumberGenerator.GetInt32(RecoveryAlphabet.Length)])]);
+
+    private static string NormalizeRecovery(string? code) => new((code ?? "").ToUpperInvariant().Where(char.IsAsciiLetterOrDigit).ToArray());
+
+    private static string WrongKey(Guid accountId) => $"second-factor|u:{accountId:N}";
+
+    private string Issuer => configuration["Guard:TwoFactor:Issuer"] is { Length: > 0 } issuer ? issuer
+        : Uri.TryCreate(configuration["Toda:PublicUrl"], UriKind.Absolute, out Uri? site) ? $"Toda ({site.Host})" : "Toda";
+
+    private static string QrPng(string text)
+    {
+        using QRCodeGenerator generator = new();
+        using QRCodeData data = generator.CreateQrCode(text, QRCodeGenerator.ECCLevel.Q);
+        return "data:image/png;base64," + Convert.ToBase64String(new PngByteQRCode(data).GetGraphic(8));
+    }
+
+    private static string Secret() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    public static string Hash(string value) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+}

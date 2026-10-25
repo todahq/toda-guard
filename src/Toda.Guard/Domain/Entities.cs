@@ -212,6 +212,9 @@ public class Group : Entity<Guid>
     /// <summary>An organization's email domains: active accounts whose email is in one of them are its members.</summary>
     public List<string> EmailDomains { get; set; } = [];
 
+    /// <summary>The group's second-factor mode (ADR 0082): one of <see cref="TwoFactorModes"/>.</summary>
+    public string TwoFactor { get; set; } = TwoFactorModes.Off;
+
     /// <summary>Whether Toda works out the members itself (a directory's or an OU's group): no one adds or removes them.</summary>
     public bool Computed => Kind is GroupKinds.Directory or GroupKinds.Ou;
 
@@ -371,6 +374,12 @@ public class SecuritySettings : Entity<Guid>
 
     /// <summary>The longest a personal access token may live: every token expires, within this.</summary>
     public int TokenMaxDays { get; set; } = DefaultTokenMaxDays;
+
+    /// <summary>
+    /// Whether toda-admins was given its first second-factor mode (ADR 0082): once, on the first start with two-factor
+    /// sign-in, so an admin's later choice stays.
+    /// </summary>
+    public bool AdminsTwoFactorSeeded { get; set; }
 }
 
 /// <summary>Whether a personal access token may change things or only read.</summary>

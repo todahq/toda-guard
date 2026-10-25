@@ -79,7 +79,8 @@ public class TodaGuardModule : AbpModule
                     .SetRevocationEndpointUris("connect/revoke")
                     // Apps and agents (M7): the authorization code flow, always with PKCE, behind a consent page.
                     .SetAuthorizationEndpointUris("connect/authorize");
-                options.AllowPasswordFlow().AllowRefreshTokenFlow().AllowAuthorizationCodeFlow().RequireProofKeyForCodeExchange();
+                options.AllowPasswordFlow().AllowRefreshTokenFlow().AllowAuthorizationCodeFlow().RequireProofKeyForCodeExchange()
+                    .AllowCustomFlow(Controllers.TokenController.SecondFactorGrant); // the second step (ADR 0082)
                 options.RegisterScopes(OpenIddictConstants.Scopes.OfflineAccess, GuardOidc.ApiScope, OAuthAgents.ReadScope);
                 // Revoking the phone app's (or a script's) refresh token ends its whole sign-in (ADR 0075).
                 options.AddEventHandler(EndSignInOnRevocation.Descriptor);

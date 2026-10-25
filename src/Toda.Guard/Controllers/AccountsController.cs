@@ -144,6 +144,24 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     [StepUp]
     public Task<AccountDto> Unlock(Guid id, CancellationToken cancellationToken) => SetLockedAsync(id, locked: false, cancellationToken);
 
+    /// <summary>
+    /// Resets a person's second factors (ADR 0082), for someone who lost their phone and their recovery codes: every one
+    /// goes, and a group that requires one has them set it up again at their next sign-in.
+    /// </summary>
+    [HttpDelete("{id:guid}/second-factors")]
+    [StepUp]
+    public async Task<NoContentResult> ResetSecondFactors(Guid id, [FromServices] Services.TwoFactor.SecondFactors secondFactors, CancellationToken cancellationToken)
+    {
+        if (id == CurrentAccountId)
+        {
+            throw new UserFriendlyException("You can't reset your own second factors. Remove them from your profile, or ask another admin.");
+        }
+
+        Ensure(await AbilityAsync(cancellationToken), "reset-second-factor", await AccountAsync(id, cancellationToken));
+        await secondFactors.ResetAsync(id, cancellationToken);
+        return NoContent();
+    }
+
     private async Task<AccountDto> SetLockedAsync(Guid id, bool locked, CancellationToken cancellationToken)
     {
         if (locked && id == CurrentAccountId)

@@ -316,6 +316,13 @@ namespace Toda.Guard.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<string>("TwoFactor")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("off");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Kind");
@@ -446,6 +453,32 @@ namespace Toda.Guard.Data.Migrations
                     b.ToTable("personal_access_tokens", "guard");
                 });
 
+            modelBuilder.Entity("Toda.Guard.Domain.RecoveryCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Hash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.ToTable("recovery_codes", "guard");
+                });
+
             modelBuilder.Entity("Toda.Guard.Domain.Role", b =>
                 {
                     b.Property<Guid>("Id")
@@ -541,6 +574,41 @@ namespace Toda.Guard.Data.Migrations
                     b.ToTable("role_rules", "guard");
                 });
 
+            modelBuilder.Entity("Toda.Guard.Domain.SecondFactor", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<long>("LastStep")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ProtectedSecret")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.ToTable("second_factors", "guard");
+                });
+
             modelBuilder.Entity("Toda.Guard.Domain.SecurityEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -603,6 +671,9 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("AdminsTwoFactorSeeded")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("RetentionDays")
                         .HasColumnType("integer");
 
@@ -659,6 +730,54 @@ namespace Toda.Guard.Data.Migrations
                     b.HasIndex("ExpiresAt");
 
                     b.ToTable("session_handoffs", "guard");
+                });
+
+            modelBuilder.Entity("Toda.Guard.Domain.SignInTicket", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Client")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Ip")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("ProvedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Scopes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("TicketHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("TicketHash")
+                        .IsUnique();
+
+                    b.ToTable("sign_in_tickets", "guard");
                 });
 
             modelBuilder.Entity("Toda.Guard.Domain.SignUpSettings", b =>

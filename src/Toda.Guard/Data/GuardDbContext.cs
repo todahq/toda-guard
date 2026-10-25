@@ -32,6 +32,9 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     public DbSet<PermissionStamp> PermissionStamps => Set<PermissionStamp>();
     public DbSet<AccountEmail> AccountEmails => Set<AccountEmail>();
     public DbSet<AccountMergeRecord> Merges => Set<AccountMergeRecord>();
+    public DbSet<SecondFactor> SecondFactors => Set<SecondFactor>();
+    public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
+    public DbSet<SignInTicket> SignInTickets => Set<SignInTicket>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -115,6 +118,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.Property(x => x.Name).HasMaxLength(256).IsRequired();
             b.Property(x => x.NormalizedName).HasMaxLength(256).IsRequired();
             b.Property(x => x.Kind).HasMaxLength(16).IsRequired().HasDefaultValue(GroupKinds.Standard);
+            b.Property(x => x.TwoFactor).HasMaxLength(16).IsRequired().HasDefaultValue(TwoFactorModes.Off);
             System.Text.Json.JsonSerializerOptions json = new(System.Text.Json.JsonSerializerDefaults.Web);
             b.Property(x => x.Attributes).HasColumnType("jsonb").HasConversion(
                 v => System.Text.Json.JsonSerializer.Serialize(v, json),
@@ -240,6 +244,32 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.HasIndex(x => x.AccountId);
             b.HasIndex(x => x.ExpiresAt);
             b.HasIndex(x => x.ParentAuthorizationId);
+        });
+
+        // A second factor (ADR 0082).
+        builder.Entity<SecondFactor>(b =>
+        {
+            b.ToTable("second_factors");
+            b.Property(x => x.Kind).HasMaxLength(32).IsRequired();
+            b.HasIndex(x => x.AccountId);
+        });
+
+        builder.Entity<RecoveryCode>(b =>
+        {
+            b.ToTable("recovery_codes");
+            b.Property(x => x.Hash).HasMaxLength(64).IsRequired();
+            b.HasIndex(x => x.AccountId);
+        });
+
+        builder.Entity<SignInTicket>(b =>
+        {
+            b.ToTable("sign_in_tickets");
+            b.Property(x => x.TicketHash).HasMaxLength(64).IsRequired();
+            b.Property(x => x.Client).HasMaxLength(100).IsRequired();
+            b.Property(x => x.Scopes).HasMaxLength(500);
+            b.Property(x => x.Ip).HasMaxLength(64);
+            b.HasIndex(x => x.TicketHash).IsUnique();
+            b.HasIndex(x => x.ExpiresAt);
         });
 
         builder.Entity<SessionHandoff>(b =>

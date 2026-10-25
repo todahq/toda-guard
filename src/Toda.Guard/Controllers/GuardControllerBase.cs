@@ -112,12 +112,13 @@ public sealed record AccountDetailDto(AccountDto Account, List<IdentityDto> Iden
 
 /// <summary>
 /// A group: Kind (standard, directory, ou, organization, ADR 0037); Computed when Toda works out its members (a directory's
-/// or an OU's group); an organization's attributes and email domains.
+/// or an OU's group); an organization's attributes and email domains; TwoFactor, whether its members are asked for a
+/// second factor (off, optional, required, strong; ADR 0082).
 /// </summary>
 public sealed record GroupDto(
     Guid Id, string Name, string? Description, Guid DirectoryId, string DirectoryName,
     bool IsLocal, bool Writable, int DirectMemberCount, int MemberGroupCount, string Kind, bool Computed,
-    Dictionary<string, string> Attributes, List<string> EmailDomains);
+    Dictionary<string, string> Attributes, List<string> EmailDomains, string TwoFactor = TwoFactorModes.Off);
 
 public sealed record GroupMemberDto(string MemberType, Guid MemberId, string Name, string? DisplayName, string DirectoryName, string Source, bool Removable);
 

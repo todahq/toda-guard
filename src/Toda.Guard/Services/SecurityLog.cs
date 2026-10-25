@@ -50,6 +50,15 @@ public static class SecurityAuditTypes
     public const string OAuthAppCreated = "oauth.app.created";
     public const string OAuthAppDeleted = "oauth.app.deleted";
 
+    /// <summary>A second factor (ADR 0082): the second step at sign-in, set up, removed, an admin's reset, new recovery codes, a group's mode.</summary>
+    public const string SecondFactorSucceeded = "auth.second-factor.succeeded";
+    public const string SecondFactorFailed = "auth.second-factor.failed";
+    public const string SecondFactorAdded = "account.second-factor.added";
+    public const string SecondFactorRemoved = "account.second-factor.removed";
+    public const string SecondFactorReset = "account.second-factor.reset";
+    public const string RecoveryCodesRenewed = "account.recovery-codes.renewed";
+    public const string GroupTwoFactor = "group.two-factor";
+
     /// <summary>A person allowed an app to act for them, or took that back.</summary>
     public const string OAuthConsentGranted = "oauth.consent.granted";
     public const string OAuthConsentRevoked = "oauth.consent.revoked";

@@ -27,6 +27,8 @@
   <ItemGroup>
     <!-- CASL .NET, the open-source authorization library. -->
     <PackageReference Include="Casl.Net" Version="0.1.0" />
+    <!-- The authenticator app's QR code (ADR 0082). MIT. -->
+    <PackageReference Include="QRCoder" Version="1.8.0" />
   </ItemGroup>
 
 </Project>

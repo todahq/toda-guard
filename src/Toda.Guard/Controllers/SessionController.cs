@@ -10,10 +10,17 @@ namespace Toda.Guard.Controllers;
 
 public sealed record SessionStartInput(string? Username, string? Password);
 
-public sealed record SessionStepUpInput(string? Password);
+/// <summary>A step-up: the password again, and a code of the person's second factor when they have one (ADR 0082).</summary>
+public sealed record SessionStepUpInput(string? Password, string? Method = null, string? Code = null);
 
-/// <summary>A browser just signed in: its account and preferences, when the session ends unless it's used, and when the person proved who they are.</summary>
-public sealed record SessionDto(AccountDto Account, PreferencesDto Preferences, DateTime ExpiresAt, DateTime AuthTime);
+/// <summary>The second step of a sign-in (ADR 0082): the ticket, and a code of the method (<c>app</c>, <c>recovery</c>).</summary>
+public sealed record SessionSecondFactorInput(string? Ticket, string? Method, string? Code);
+
+/// <summary>
+/// A browser just signed in: its account and preferences, when the session ends unless it's used, and when the person
+/// proved who they are. <paramref name="SecondFactorOffered"/>: a group of theirs offers a second factor they haven't set up.
+/// </summary>
+public sealed record SessionDto(AccountDto Account, PreferencesDto Preferences, DateTime ExpiresAt, DateTime AuthTime, bool SecondFactorOffered = false);
 
 /// <summary>When a step-up passed: the session's new proof of who the person is.</summary>
 public sealed record SessionStepUpDto(DateTime AuthTime);
@@ -28,10 +35,18 @@ public sealed record SessionHandoffDto(string Code, DateTime ExpiresAt);
 /// and tools keep bearer tokens from the token endpoint.
 /// </summary>
 [Route("api/guard/session")]
-public class SessionController(AuthService auth, WebSessions sessions, GuardDb guardDb, Toda.Platform.SiteCalendar calendar, IConfiguration configuration)
+public class SessionController(AuthService auth, WebSessions sessions, GuardDb guardDb, Toda.Platform.SiteCalendar calendar, IConfiguration configuration,
+    Services.TwoFactor.SecondFactors secondFactors)
     : GuardControllerBase
 {
-    /// <summary>Signs in with a username and password; a session this browser had before ends.</summary>
+    /// <summary>The web's client, in a sign-in ticket.</summary>
+    public const string WebClient = "web";
+
+    /// <summary>
+    /// Signs in with a username and password; a session this browser had before ends. When the person's groups ask for a
+    /// second factor, or they set one up, the answer is 401 <c>second_factor_required</c> with <c>secondFactor</c>: a
+    /// ticket for <c>POST /api/guard/session/second-factor</c> and the methods it takes (ADR 0082).
+    /// </summary>
     [HttpPost]
     [AllowAnonymous]
     [ProducesResponseType<SessionDto>(200)]
@@ -58,16 +73,64 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
             };
         }
 
+        if (await secondFactors.ChallengeAsync(result.Account!.Id, WebClient, null, ClientIp, cancellationToken) is { } challenge)
+        {
+            return new ObjectResult(new
+            {
+                error = new { code = "second_factor_required", message = challenge.Enrol ? "Set up a second factor to sign in." : "Enter the code of your second factor." },
+                secondFactor = challenge,
+            }) { StatusCode = 401 };
+        }
+
+        return Ok(await StartSessionAsync(result.Account!.Id, cancellationToken));
+    }
+
+    /// <summary>
+    /// The second step of a sign-in (ADR 0082): the ticket from the password, and a code of the method (<c>app</c>, or a
+    /// <c>recovery</c> code); or the ticket alone, once a second factor was set up with it. Answers as signing in does.
+    /// </summary>
+    [HttpPost("second-factor")]
+    [AllowAnonymous]
+    [ProducesResponseType<SessionDto>(200)]
+    public async Task<IActionResult> SecondFactor([FromBody] SessionSecondFactorInput input, CancellationToken cancellationToken)
+    {
+        if (WebSessionHandler.IsCrossSite(Request, configuration["Toda:PublicUrl"]))
+        {
+            return Error(403, "cross_site_request", "This request came from another site and was refused.");
+        }
+
+        if (input.Ticket is not { Length: > 0 } ticket)
+        {
+            return Error(400, "invalid_request", "Expected a JSON body with the sign-in's ticket and a code.");
+        }
+
+        Services.TwoFactor.SecondStepResult step = await secondFactors.PassAsync(ticket, input.Method, input.Code, WebClient, ClientIp, cancellationToken);
+        return step.Passed is { } passed
+            ? Ok(await StartSessionAsync(passed.AccountId, cancellationToken))
+            : SecondStepError(step.Error);
+    }
+
+    /// <summary>The answers a failed second step gives.</summary>
+    public static ObjectResult SecondStepError(string? error) => error switch
+    {
+        "too_many_attempts" => Error(429, "too_many_attempts", "Too many wrong codes. Try again in 15 minutes."),
+        "second_factor_failed" => Error(400, "second_factor_failed", "The code is incorrect."),
+        _ => Error(401, "ticket_expired", "This sign-in has expired. Sign in again."),
+    };
+
+    private async Task<SessionDto> StartSessionAsync(Guid accountId, CancellationToken cancellationToken)
+    {
         await EndPreviousAsync(cancellationToken);
-        (WebSession session, string secret) = await sessions.StartAsync(result.Account!.Id, Request.Headers.UserAgent.ToString(), ClientIp,
-            cancellationToken: cancellationToken);
+        (WebSession session, string secret) = await sessions.StartAsync(accountId, Request.Headers.UserAgent.ToString(), ClientIp, cancellationToken: cancellationToken);
         WebSessionHandler.Issue(HttpContext, secret, embedded: false);
-        return Ok(await guardDb.RunAsync(async db =>
+        Services.TwoFactor.MySecondFactorsDto mine = await secondFactors.ListAsync(accountId, cancellationToken);
+        return await guardDb.RunAsync(async db =>
         {
             Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == session.AccountId, cancellationToken);
             string directory = await db.Directories.Where(d => d.Id == account.DirectoryId).Select(d => d.Name).FirstOrDefaultAsync(cancellationToken) ?? "?";
-            return new SessionDto(AccountDto.From(account, directory), PreferencesDto.For(account, calendar), session.ExpiresAt, session.AuthTime);
-        }, cancellationToken: cancellationToken));
+            return new SessionDto(AccountDto.From(account, directory), PreferencesDto.For(account, calendar), session.ExpiresAt, session.AuthTime,
+                mine is { Mode: Domain.TwoFactorModes.Optional, Factors.Count: 0, Disabled: false });
+        }, cancellationToken: cancellationToken);
     }
 
     /// <summary>Signs out: the session ends and the browser forgets its cookies.</summary>
@@ -114,6 +177,14 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
         if (!result.Succeeded)
         {
             return Error(400, "step_up_failed", "The password is incorrect.");
+        }
+
+        // A person with a second factor proves it again too (ADR 0082).
+        if (await secondFactors.StepUpErrorAsync(CurrentAccountId, input.Method, input.Code, ClientIp, cancellationToken) is { } secondFactorError)
+        {
+            return secondFactorError == "second_factor_required"
+                ? Error(400, "second_factor_required", "Enter the code of your second factor too.")
+                : SecondStepError(secondFactorError);
         }
 
         return await sessions.MarkSteppedUpAsync(sessionId, cancellationToken) is { } authTime
@@ -194,7 +265,7 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
         }
     }
 
-    private static ObjectResult Error(int status, string code, string message) => new(new { error = new { code, message } }) { StatusCode = status };
+    internal static ObjectResult Error(int status, string code, string message) => new(new { error = new { code, message } }) { StatusCode = status };
 }
 
 /// <summary>

@@ -29,6 +29,7 @@ public class OidcClientSeeder(IOpenIddictApplicationManager applications, IConfi
                 Permissions.Endpoints.Revocation,
                 Permissions.GrantTypes.Password,
                 Permissions.GrantTypes.RefreshToken,
+                Permissions.Prefixes.GrantType + TokenController.SecondFactorGrant, // the second step (ADR 0082)
                 Permissions.Prefixes.Scope + Scopes.OfflineAccess,
                 Permissions.Prefixes.Scope + GuardOidc.ApiScope,
             },
@@ -48,6 +49,7 @@ public class OidcClientSeeder(IOpenIddictApplicationManager applications, IConfi
                 Permissions.Endpoints.Revocation,
                 Permissions.GrantTypes.Password,
                 Permissions.GrantTypes.RefreshToken,
+                Permissions.Prefixes.GrantType + TokenController.SecondFactorGrant, // the second step (ADR 0082)
                 Permissions.Prefixes.Scope + Scopes.OfflineAccess,
                 Permissions.Prefixes.Scope + GuardOidc.ApiScope,
             },

@@ -11,9 +11,21 @@ using Volo.Abp.DependencyInjection;
 namespace Toda.Guard.Services;
 
 /// <summary>Creates the internal directory, the first admin, and the toda-admins and toda-users groups.</summary>
-public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfiguration configuration) : ITransientDependency
+public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfiguration configuration, IHostEnvironment environment, ILogger<GuardSeeder> logger)
+    : ITransientDependency
 {
-    public Task SeedAsync(CancellationToken cancellationToken = default) => guardDb.RunAsync(async db =>
+    public Task SeedAsync(CancellationToken cancellationToken = default)
+    {
+        if (configuration.GetValue("Guard:TwoFactor:Disabled", false))
+        {
+            logger.LogWarning("Guard:TwoFactor:Disabled is set: nobody is asked for a second factor. It's the emergency switch for a site whose admins "
+                + "lost theirs; remove it once they're back in (ADR 0082).");
+        }
+
+        return SeedTablesAsync(cancellationToken);
+    }
+
+    private Task SeedTablesAsync(CancellationToken cancellationToken) => guardDb.RunAsync(async db =>
     {
         if (!await db.Directories.AnyAsync(d => d.Id == GuardConstants.InternalDirectoryId, cancellationToken))
         {
@@ -53,6 +65,17 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
         if (!await db.Memberships.AnyAsync(m => m.GroupId == GuardConstants.AdminsGroupId && m.MemberType == MemberType.Account && m.MemberId == adminAccount.Id, cancellationToken))
         {
             db.Memberships.Add(new GroupMembership(Guid.NewGuid(), GuardConstants.AdminsGroupId, MemberType.Account, adminAccount.Id, MembershipSource.Manual));
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        // toda-admins must use a second factor on a production site, and is offered one in Development so dev servers and
+        // test scripts sign in as before (ADR 0082). Once, so an admin's later choice stays.
+        SecuritySettings settings = await Controllers.SecuritySettingsController.LoadAsync(db, cancellationToken);
+        if (!settings.AdminsTwoFactorSeeded)
+        {
+            Group admins = await db.Groups.FirstAsync(g => g.Id == GuardConstants.AdminsGroupId, cancellationToken);
+            admins.TwoFactor = environment.IsDevelopment() ? TwoFactorModes.Optional : TwoFactorModes.Required;
+            settings.AdminsTwoFactorSeeded = true;
             await db.SaveChangesAsync(cancellationToken);
         }
     }, requiresNew: true, cancellationToken);

@@ -216,6 +216,35 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
         return dto;
     }
 
+    public sealed record GroupTwoFactorInput(string? Mode);
+
+    /// <summary>
+    /// Sets whether the group's members are asked for a second factor (ADR 0082): <c>off</c>, <c>optional</c>,
+    /// <c>required</c> or <c>strong</c>. A person follows the strictest of all their groups, nested and synced ones too.
+    /// </summary>
+    [HttpPut("{id:guid}/two-factor")]
+    [StepUp]
+    public Task<GroupDto> SetTwoFactor(Guid id, [FromBody] GroupTwoFactorInput input, CancellationToken cancellationToken)
+    {
+        if (input.Mode is not { } mode || !TwoFactorModes.All.Contains(mode))
+        {
+            throw new UserFriendlyException($"The mode is one of {string.Join(", ", TwoFactorModes.All)}.");
+        }
+
+        return guardDb.RunAsync(async db =>
+        {
+            Group group = await db.Groups.FirstOrDefaultAsync(g => g.Id == id, cancellationToken) ?? throw new EntityNotFoundException(typeof(Group), id);
+            if (group.TwoFactor != mode)
+            {
+                audit.Add(db, SecurityAuditTypes.GroupTwoFactor, Target(group), new { before = group.TwoFactor, after = mode });
+                group.TwoFactor = mode;
+                await db.SaveChangesAsync(cancellationToken);
+            }
+
+            return (await ToDtosAsync(db, [group], cancellationToken))[0];
+        }, requiresNew: true, cancellationToken);
+    }
+
     [HttpDelete("{id:guid}")]
     [StepUp]
     public async Task<NoContentResult> Delete(Guid id, CancellationToken cancellationToken)
@@ -406,7 +435,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
                 g.Id, g.Name, g.Description, g.DirectoryId, directories.GetValueOrDefault(g.DirectoryId, "?"), g.IsLocal, IsWritable(g),
                 g.Kind == GroupKinds.Directory ? owned.GetValueOrDefault(g.DirectoryId) : counts.Where(c => c.GroupId == g.Id && !c.IsGroup).Sum(c => c.Count),
                 counts.Where(c => c.GroupId == g.Id && c.IsGroup).Sum(c => c.Count),
-                g.Kind, g.Computed, g.Attributes, g.EmailDomains))
+                g.Kind, g.Computed, g.Attributes, g.EmailDomains, g.TwoFactor))
             .ToList();
     }
 }
