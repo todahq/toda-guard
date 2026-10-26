@@ -10,7 +10,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Toda.Guard.Domain;
 using Toda.Platform.Acting;
-using Toda.Platform.Changes;
 using OpenIddict.Abstractions;
 using Volo.Abp.DependencyInjection;
 
@@ -25,8 +24,11 @@ public sealed record WebSessionInfo(Guid Id, Guid AccountId, string Username, st
 /// ended or stepped-up one is forgotten at once on this server, and on the others as soon as they're told
 /// (<see cref="WebSessionChanged"/>), at worst within those seconds.
 /// </summary>
-public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthorizationManager authorizations, ChangeNotices changes) : ITransientDependency
+public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthorizationManager authorizations, IGuardBroadcast changes) : ITransientDependency
 {
+    /// <summary>The topic other servers hear of a session ended or stepped up on (docs/ha.md step 2; ADR 0087's broadcast).</summary>
+    public const string Topic = "web-session";
+
     /// <summary>How long a session lives unused; each use pushes its end on (as the web's refresh tokens did, ADR 0007).</summary>
     public static readonly TimeSpan Lifetime = TimeSpan.FromDays(14);
 
@@ -175,7 +177,7 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthori
     private void Forget(string hash)
     {
         cache.Remove(Key(hash));
-        changes.Notify(ChangeTopics.WebSession, hash);
+        changes.Notify(Topic, hash);
     }
 
     /// <summary>A step-up passed (ADR 0042): the session says the person proved who they are just now. Null when it has ended.</summary>

@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Caching.Memory;
-using Toda.Platform.Changes;
 
 namespace Toda.Guard.Services;
 
@@ -8,9 +7,9 @@ namespace Toda.Guard.Services;
 /// it, so the next request reads the session as it is now. After missed notices there's nothing to name; the checks
 /// this server remembers end within seconds anyway.
 /// </summary>
-public sealed class WebSessionChanged(IMemoryCache cache) : IChangeHandler
+public sealed class WebSessionChanged(IMemoryCache cache) : IGuardBroadcastHandler
 {
-    public string Topic => ChangeTopics.WebSession;
+    public string Topic => WebSessions.Topic;
 
     public Task HandleAsync(string? detail, CancellationToken cancellationToken)
     {

@@ -145,7 +145,9 @@ public class TodaGuardModule : AbpModule
         // request without one is a browser's, signed in by its session cookie (ADR 0075).
         context.Services.AddMemoryCache();
         // A session ended or stepped up on another server is forgotten here at once (docs/ha.md step 2).
-        context.Services.AddSingleton<Toda.Platform.Changes.IChangeHandler, Services.WebSessionChanged>();
+        context.Services.AddSingleton<IGuardBroadcastHandler, Services.WebSessionChanged>();
+        // Telling the other servers (ADR 0087): no one to tell on a site of one server, unless the host has several.
+        context.Services.TryAddSingleton<IGuardBroadcast, SingleServerGuardBroadcast>();
         context.Services.AddAuthentication(TodaBearer)
             .AddPolicyScheme(TodaBearer, null, options => options.ForwardDefaultSelector = http => SchemeFor(http.Request))
             .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, PersonalTokenHandler>(PersonalTokenHandler.SchemeName, null)
