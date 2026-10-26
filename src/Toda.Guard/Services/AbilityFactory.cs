@@ -20,8 +20,7 @@ public static class GuardSubjects
             .Fields("displayName", "email", "status"))
         .Add<Group>("Group", s => s.ConditionFields("id", "directoryId", "isLocal").Fields("name", "description"))
         .Add<UserDirectory>("Directory", s => s.ConditionFields("id", "type", "isActive"))
-        .Add<RoleSubject>("Role")
-        .Add<PluginSubject>("Plugin");
+        .Add<RoleSubject>("Role"); // Toda adds "Plugin" (Toda.Guard.Integration's TodaSubjects, ADR 0087)
 
     public static SubjectRegistry Registry => AbilitySubjects.Registry;
 
@@ -30,8 +29,6 @@ public static class GuardSubjects
 
     /// <summary>Marker types for subjects that only get type-level checks for now.</summary>
     public sealed class RoleSubject;
-
-    public sealed class PluginSubject;
 }
 
 /// <summary>
