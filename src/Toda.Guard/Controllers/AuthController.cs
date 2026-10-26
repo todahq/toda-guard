@@ -14,8 +14,8 @@ namespace Toda.Guard.Controllers;
 /// </summary>
 public sealed record PreferencesDto(string? Language, string? TimeZone, string SiteTimeZone, string FirstDayOfWeek, string Motion)
 {
-    public static PreferencesDto For(Account account, Toda.Platform.SiteCalendar calendar) =>
-        new(account.Language, account.TimeZone, calendar.TimeZone, calendar.FirstDayOfWeek.ToString().ToLowerInvariant(), account.Motion ?? "system");
+    public static PreferencesDto For(Account account, IGuardSiteDefaults site) =>
+        new(account.Language, account.TimeZone, site.TimeZone, site.FirstDayOfWeek.ToString().ToLowerInvariant(), account.Motion ?? "system");
 }
 
 public sealed record PreferencesInput(string? Language, string? TimeZone);
@@ -24,8 +24,7 @@ public sealed record PreferencesInput(string? Language, string? TimeZone);
 public sealed record MotionInput(string? Motion);
 
 [Route("api/guard")]
-public class AuthController(GuardDb guardDb, MembershipGraph graph, Toda.Platform.Localization.LocalizationCache localization,
-    Toda.Platform.SiteCalendar calendar) : GuardControllerBase
+public class AuthController(GuardDb guardDb, MembershipGraph graph, IGuardSiteDefaults siteDefaults) : GuardControllerBase
 {
     /// <summary>Sets the person's language and time zone; null (or empty) goes back to the site's.</summary>
     [HttpPut("me/preferences")]
@@ -36,8 +35,8 @@ public class AuthController(GuardDb guardDb, MembershipGraph graph, Toda.Platfor
         string? zone = string.IsNullOrWhiteSpace(input.TimeZone) ? null : input.TimeZone.Trim();
         if (language is not null)
         {
-            Toda.Platform.Localization.LanguageInfo? known = (await localization.SnapshotAsync(cancellationToken)).Find(language);
-            language = known is { Enabled: true } ? known.Code : throw new Volo.Abp.UserFriendlyException($"'{language}' isn't one of the site's languages.");
+            language = await siteDefaults.ChoosableLanguageAsync(language, cancellationToken)
+                ?? throw new Volo.Abp.UserFriendlyException($"'{language}' isn't one of the site's languages.");
         }
 
         if (zone is not null && !TimeZoneInfo.TryFindSystemTimeZoneById(zone, out _))
@@ -55,7 +54,7 @@ public class AuthController(GuardDb guardDb, MembershipGraph graph, Toda.Platfor
         }, requiresNew: true, cancellationToken: cancellationToken);
     }
 
-    private PreferencesDto Preferences(Account account) => PreferencesDto.For(account, calendar);
+    private PreferencesDto Preferences(Account account) => PreferencesDto.For(account, siteDefaults);
 
     /// <summary>
     /// How much the interface moves for the person (ADR 0058): system follows their device's setting, reduced keeps

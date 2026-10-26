@@ -7,6 +7,7 @@ using Toda.Guard.Domain;
 using Toda.Sdk;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Toda.Guard.Services;
 
@@ -121,14 +122,14 @@ public static class AddressMail
 /// follow a link mailed to the address. A verified address belongs to one account: adding one another account has is
 /// refused, except a placeholder's, which is then merged into this account.
 /// </summary>
-public class AccountEmailService(GuardDb guardDb, IDataProtectionProvider protection, IChannels channels, IConfiguration configuration, AccountMergeService merges)
+public class AccountEmailService(GuardDb guardDb, IDataProtectionProvider protection, IChannels channels, IOptions<GuardOptions> options, AccountMergeService merges)
     : ITransientDependency
 {
     public const int MaxAddresses = 20;
     public static readonly TimeSpan VerifyFor = TimeSpan.FromHours(72);
 
     private ITimeLimitedDataProtector Verifier => protection.CreateProtector("Toda.Guard.Email.Verify").ToTimeLimitedDataProtector();
-    private string Site => (configuration["Toda:PublicUrl"] ?? "http://localhost:3000").TrimEnd('/');
+    private string Site => (options.Value.PublicUrl ?? "http://localhost:3000").TrimEnd('/');
 
     public Task<AccountEmailsDto> ListAsync(Guid accountId, CancellationToken ct) => guardDb.RunAsync(db => LoadAsync(db, accountId, ct), cancellationToken: ct);
 

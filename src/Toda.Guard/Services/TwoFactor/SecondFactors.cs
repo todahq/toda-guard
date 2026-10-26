@@ -11,6 +11,7 @@ using Toda.Sdk;
 using QRCoder;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Toda.Guard.Services.TwoFactor;
 
@@ -70,6 +71,7 @@ public sealed class SecondFactors(
     IGuardRateLimits limits,
     SecurityLog audit,
     IConfiguration configuration,
+    IOptions<GuardOptions> options,
     IChannels channels,
     Toda.Platform.Channels.ChannelAddressBook addressBook,
     Toda.Platform.Mail.EmailChannel email,
@@ -591,7 +593,7 @@ public sealed class SecondFactors(
     private static string WrongKey(Guid accountId) => $"second-factor|u:{accountId:N}";
 
     private string Issuer => configuration["Guard:TwoFactor:Issuer"] is { Length: > 0 } issuer ? issuer
-        : Uri.TryCreate(configuration["Toda:PublicUrl"], UriKind.Absolute, out Uri? site) ? $"Toda ({site.Host})" : "Toda";
+        : Uri.TryCreate(options.Value.PublicUrl, UriKind.Absolute, out Uri? site) ? $"Toda ({site.Host})" : "Toda";
 
     private static string QrPng(string text)
     {

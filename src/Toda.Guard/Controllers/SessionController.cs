@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
 using OpenIddict.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace Toda.Guard.Controllers;
 
@@ -35,7 +36,7 @@ public sealed record SessionHandoffDto(string Code, DateTime ExpiresAt);
 /// and tools keep bearer tokens from the token endpoint.
 /// </summary>
 [Route("api/guard/session")]
-public class SessionController(AuthService auth, WebSessions sessions, GuardDb guardDb, Toda.Platform.SiteCalendar calendar, IConfiguration configuration,
+public class SessionController(AuthService auth, WebSessions sessions, GuardDb guardDb, IGuardSiteDefaults siteDefaults, IOptions<GuardOptions> options,
     Services.TwoFactor.SecondFactors secondFactors)
     : GuardControllerBase
 {
@@ -52,7 +53,7 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
     [ProducesResponseType<SessionDto>(200)]
     public async Task<IActionResult> Start([FromBody] SessionStartInput input, CancellationToken cancellationToken)
     {
-        if (WebSessionHandler.IsCrossSite(Request, configuration["Toda:PublicUrl"]))
+        if (WebSessionHandler.IsCrossSite(Request, options.Value.PublicUrl))
         {
             return Error(403, "cross_site_request", "This request came from another site and was refused.");
         }
@@ -94,7 +95,7 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
     [ProducesResponseType<SessionDto>(200)]
     public async Task<IActionResult> SecondFactor([FromBody] SessionSecondFactorInput input, CancellationToken cancellationToken)
     {
-        if (WebSessionHandler.IsCrossSite(Request, configuration["Toda:PublicUrl"]))
+        if (WebSessionHandler.IsCrossSite(Request, options.Value.PublicUrl))
         {
             return Error(403, "cross_site_request", "This request came from another site and was refused.");
         }
@@ -128,7 +129,7 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
         {
             Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == session.AccountId, cancellationToken);
             string directory = await db.Directories.Where(d => d.Id == account.DirectoryId).Select(d => d.Name).FirstOrDefaultAsync(cancellationToken) ?? "?";
-            return new SessionDto(AccountDto.From(account, directory), PreferencesDto.For(account, calendar), session.ExpiresAt, session.AuthTime,
+            return new SessionDto(AccountDto.From(account, directory), PreferencesDto.For(account, siteDefaults), session.ExpiresAt, session.AuthTime,
                 mine is { Mode: Domain.TwoFactorModes.Optional, Factors.Count: 0, Disabled: false });
         }, cancellationToken: cancellationToken);
     }

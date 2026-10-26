@@ -55,6 +55,9 @@ public class TodaGuardModule : AbpModule
         context.Services.TryAddSingleton<IGuardLocks, PostgresGuardLocks>();
         // What Guard's limits count with (ADR 0087): guard.rate_limits, unless the host gives its own.
         context.Services.TryAddSingleton<IGuardRateLimits, PostgresGuardRateLimits>();
+        // Guard's settings (ADR 0087), and the site's defaults from them unless the host has its own.
+        context.Services.Configure<GuardOptions>(configuration.GetSection(GuardOptions.Section));
+        context.Services.TryAddTransient<IGuardSiteDefaults, OptionsGuardSiteDefaults>();
         Configure<AbpDbContextOptions>(options =>
             options.Configure<GuardDbContext>(c => c.UseNpgsql(npgsql =>
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", GuardDbContext.Schema))));

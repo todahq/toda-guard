@@ -9,6 +9,7 @@ using Toda.Guard.Domain;
 using Toda.Sdk;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Toda.Guard.Services;
 
@@ -99,7 +100,7 @@ public static class SelfServiceMail
 /// changes. Answers never say whether an email has an account, except sign-up, which has to.
 /// </summary>
 [ExposeServices(typeof(SelfService), typeof(ICustomerAccounts))]
-public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IChannels channels, IConfiguration configuration,
+public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IChannels channels, IOptions<GuardOptions> options,
     IGuardEventSink events, AccountMergeService merges, SecurityLog audit) : ITransientDependency, ICustomerAccounts
 {
     public static readonly TimeSpan VerifyFor = TimeSpan.FromHours(72);
@@ -107,7 +108,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
 
     private ITimeLimitedDataProtector Verifier => protection.CreateProtector("Toda.Guard.SignUp.Verify").ToTimeLimitedDataProtector();
     private ITimeLimitedDataProtector Resetter => protection.CreateProtector("Toda.Guard.Password.Reset").ToTimeLimitedDataProtector();
-    private string Site => (configuration["Toda:PublicUrl"] ?? "http://localhost:3000").TrimEnd('/');
+    private string Site => (options.Value.PublicUrl ?? "http://localhost:3000").TrimEnd('/');
 
     public Task<SignUpSettingsDto> SettingsAsync(CancellationToken ct) => guardDb.RunAsync(async db =>
     {
