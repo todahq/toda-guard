@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Toda.Guard.Directories;
 using Toda.Guard.Domain;
-using Toda.Platform.Plugins;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
@@ -48,18 +47,18 @@ public class DirectorySecrets(IDataProtectionProvider dataProtection) : ISinglet
 }
 
 /// <summary>Finds the connector for a directory type among core and plugin-provided extensions.</summary>
-public class ConnectorCatalog(PluginRuntime runtime, IServiceProvider services, DirectorySecrets secrets) : ITransientDependency
+public class ConnectorCatalog(IGuardExtensions extensions, IServiceProvider services, DirectorySecrets secrets) : ITransientDependency
 {
     public async Task<T> WithConnectorAsync<T>(string type, Func<IDirectoryConnector?, string?, Task<T>> work)
     {
-        await using ExtensionLease<IDirectoryConnector> lease = runtime.LeaseExtensions<IDirectoryConnector>(services);
+        await using IGuardLease<IDirectoryConnector> lease = extensions.Lease<IDirectoryConnector>(services);
         (string? pluginKey, IDirectoryConnector? connector) = lease.Items.FirstOrDefault(i => i.Instance.Type == type);
         return await work(connector, pluginKey);
     }
 
     public async Task<List<ConnectorDescription>> DescribeAllAsync()
     {
-        await using ExtensionLease<IDirectoryConnector> lease = runtime.LeaseExtensions<IDirectoryConnector>(services);
+        await using IGuardLease<IDirectoryConnector> lease = extensions.Lease<IDirectoryConnector>(services);
         return lease.Items
             .Select(i => new ConnectorDescription(i.Instance.Type, i.Instance.DisplayName, i.Instance.Capabilities, i.Instance.Settings.ToList(), i.PluginKey))
             .ToList();

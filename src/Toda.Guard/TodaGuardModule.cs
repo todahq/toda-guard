@@ -148,6 +148,8 @@ public class TodaGuardModule : AbpModule
         context.Services.AddSingleton<IGuardBroadcastHandler, Services.WebSessionChanged>();
         // Telling the other servers (ADR 0087): no one to tell on a site of one server, unless the host has several.
         context.Services.TryAddSingleton<IGuardBroadcast, SingleServerGuardBroadcast>();
+        // Directory connectors and merge participants (ADR 0087): the host's own from DI, unless the host has plugins.
+        context.Services.TryAddSingleton<IGuardExtensions, ServiceGuardExtensions>();
         context.Services.AddAuthentication(TodaBearer)
             .AddPolicyScheme(TodaBearer, null, options => options.ForwardDefaultSelector = http => SchemeFor(http.Request))
             .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, PersonalTokenHandler>(PersonalTokenHandler.SchemeName, null)

@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
-using Toda.Platform.Plugins;
 using Toda.Sdk;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
@@ -51,7 +50,7 @@ public sealed record DuplicateDto(string Email, List<AccountSummaryDto> Accounts
 /// move their rows in one transaction; plugins' participants follow, each on its own, and a merge they didn't finish can
 /// be resumed. The source stays: inactive, merged into the survivor, with its username.
 /// </summary>
-public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServiceProvider services, IGuardEventSink events, ILogger<AccountMergeService> logger)
+public class AccountMergeService(GuardDb guardDb, IGuardExtensions extensions, IServiceProvider services, IGuardEventSink events, ILogger<AccountMergeService> logger)
     : ITransientDependency
 {
     public async Task<MergePreviewDto> PreviewAsync(Guid sourceId, Guid survivorId, Guid? actorId, CancellationToken ct)
@@ -65,7 +64,7 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
 
         List<MergePartDto> parts = [];
         parts.Add(new MergePartDto("guard", false, Dto(await guardDb.RunAsync(db => GuardCountsAsync(db, source, survivor, ct), cancellationToken: ct)), null));
-        await using (ExtensionLease<IAccountMergeParticipant> lease = runtime.LeaseExtensions<IAccountMergeParticipant>(services))
+        await using (IGuardLease<IAccountMergeParticipant> lease = extensions.Lease<IAccountMergeParticipant>(services))
         {
             foreach ((string? plugin, IAccountMergeParticipant participant) in lease.Items)
             {
@@ -91,7 +90,7 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
     /// </summary>
     public async Task<AccountMergeDto> MergeAsync(Guid sourceId, Guid survivorId, Guid? actorId, string reason, string? confirm, CancellationToken ct)
     {
-        await using ExtensionLease<IAccountMergeParticipant> lease = runtime.LeaseExtensions<IAccountMergeParticipant>(services);
+        await using IGuardLease<IAccountMergeParticipant> lease = extensions.Lease<IAccountMergeParticipant>(services);
         List<(string Key, IAccountMergeParticipant Participant)> host = lease.Items.Where(i => i.PluginKey is null).Select(i => (HostKey(i.Instance), i.Instance)).ToList();
         List<(string Key, IAccountMergeParticipant Participant)> plugins = lease.Items.Where(i => i.PluginKey is not null).Select(i => (i.PluginKey!, i.Instance)).ToList();
 
@@ -149,7 +148,7 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
             ?? throw new Volo.Abp.Domain.Entities.EntityNotFoundException(typeof(AccountMergeRecord), mergeId);
         string survivorName = await guardDb.RunAsync(db => db.Accounts.Where(a => a.Id == record.SurvivorId).Select(a => a.DisplayName).FirstAsync(ct), cancellationToken: ct);
         AccountMerge merge = new(record.Id, record.SourceId, record.SourceUsername, record.SurvivorId, record.SurvivorUsername, survivorName);
-        await using ExtensionLease<IAccountMergeParticipant> lease = runtime.LeaseExtensions<IAccountMergeParticipant>(services);
+        await using IGuardLease<IAccountMergeParticipant> lease = extensions.Lease<IAccountMergeParticipant>(services);
         // Every enabled plugin with a participant is asked again unless it finished: one that was off when the merge ran
         // has no step yet. Moving is safe to repeat, so asking twice does no harm.
         HashSet<string> finished = record.Steps.Where(s => s.Plugin && s.State == "done").Select(s => s.Key).ToHashSet();
