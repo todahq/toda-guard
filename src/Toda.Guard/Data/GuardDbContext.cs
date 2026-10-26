@@ -36,6 +36,8 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
     public DbSet<SignInTicket> SignInTickets => Set<SignInTicket>();
     public DbSet<SentCode> SentCodes => Set<SentCode>();
+    public DbSet<PrivacyStoreRecord> PrivacyStores => Set<PrivacyStoreRecord>();
+    public DbSet<PrivacySettings> PrivacySettings => Set<PrivacySettings>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -297,6 +299,33 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.Property(x => x.AuthorizationId).HasMaxLength(100).IsRequired();
             b.HasIndex(x => x.CodeHash).IsUnique();
             b.HasIndex(x => x.ExpiresAt);
+        });
+
+        builder.Entity<PrivacyStoreRecord>(b =>
+        {
+            b.ToTable("privacy_stores");
+            b.HasKey(x => x.StoreKey);
+            b.Property(x => x.StoreKey).HasMaxLength(200);
+            b.Property(x => x.LegalBasis).HasMaxLength(32);
+            b.Property(x => x.Notes).HasMaxLength(4000);
+        });
+
+        builder.Entity<PrivacySettings>(b =>
+        {
+            b.ToTable("privacy_settings");
+            b.Property(x => x.Id).ValueGeneratedNever();
+            b.Property(x => x.ControllerName).HasMaxLength(200);
+            b.Property(x => x.ControllerContact).HasMaxLength(500);
+            b.Property(x => x.OfficerName).HasMaxLength(200);
+            b.Property(x => x.OfficerContact).HasMaxLength(500);
+            System.Text.Json.JsonSerializerOptions json = new(System.Text.Json.JsonSerializerDefaults.Web);
+            b.Property(x => x.Destinations).HasColumnType("jsonb").HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v, json),
+                v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, PrivacyDestination>>(v, json) ?? new(),
+                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<Dictionary<string, PrivacyDestination>>(
+                    (a, b) => System.Text.Json.JsonSerializer.Serialize(a, json) == System.Text.Json.JsonSerializer.Serialize(b, json),
+                    v => System.Text.Json.JsonSerializer.Serialize(v, json).GetHashCode(),
+                    v => new Dictionary<string, PrivacyDestination>(v)));
         });
     }
 }

@@ -66,6 +66,11 @@ public static class SecurityAuditTypes
     /// <summary>A person allowed an app to act for them, or took that back.</summary>
     public const string OAuthConsentGranted = "oauth.consent.granted";
     public const string OAuthConsentRevoked = "oauth.consent.revoked";
+
+    /// <summary>What an admin recorded for a store of personal data, the site's controller and officer, and the record of processing downloaded (ADR 0082).</summary>
+    public const string PrivacyStore = "privacy.store";
+    public const string PrivacySettings = "settings.privacy";
+    public const string PrivacyRecordExported = "privacy.record.exported";
 }
 
 /// <summary>

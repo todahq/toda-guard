@@ -453,6 +453,70 @@ namespace Toda.Guard.Data.Migrations
                     b.ToTable("personal_access_tokens", "guard");
                 });
 
+            modelBuilder.Entity("Toda.Guard.Domain.PrivacySettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ControllerContact")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ControllerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Destinations")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("OfficerContact")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("OfficerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("privacy_settings", "guard");
+                });
+
+            modelBuilder.Entity("Toda.Guard.Domain.PrivacyStoreRecord", b =>
+                {
+                    b.Property<string>("StoreKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("LegalBasis")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<bool?>("Sensitive")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("StoreKey");
+
+                    b.ToTable("privacy_stores", "guard");
+                });
+
             modelBuilder.Entity("Toda.Guard.Domain.RecoveryCode", b =>
                 {
                     b.Property<Guid>("Id")
