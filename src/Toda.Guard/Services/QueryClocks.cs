@@ -1,4 +1,5 @@
 using Toda.Platform;
+using Toda.Platform.Query;
 using Toda.Query;
 using Volo.Abp.DependencyInjection;
 

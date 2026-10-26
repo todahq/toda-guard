@@ -1,8 +1,6 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Casl;
-using Toda.Query;
-using Toda.Sdk;
 
 namespace Toda.Guard;
 
@@ -83,10 +81,13 @@ public interface IRoleRules
 
 public static partial class RoleKeys
 {
+    /// <summary>The contracts reference nothing of Toda's (ADR 0087), so the timeout is their own: the SDK's value.</summary>
+    private const int TimeoutMilliseconds = 1000;
+
     /// <summary>What a role's key looks like: lowercase, a letter first, 2 to 64 characters.</summary>
     public static readonly Regex Pattern = Format();
 
-    [GeneratedRegex("^[a-z][a-z0-9-]{1,63}$", RegexOptions.None, TextPatterns.TimeoutMilliseconds)]
+    [GeneratedRegex("^[a-z][a-z0-9-]{1,63}$", RegexOptions.None, TimeoutMilliseconds)]
     private static partial Regex Format();
 }
 
@@ -101,23 +102,6 @@ public interface ICustomerAccounts
     /// finds its sender this way (M10 step 7), where a portal request, confirmed by its link, may make an account.
     /// </summary>
     Task<Guid?> AccountWithAddressAsync(string email, CancellationToken ct);
-}
-
-/// <summary>A person's clock for queries (ADR 0013): now, their time zone, and the site's first day of the week.</summary>
-public interface IQueryClocks
-{
-    Task<QueryClock> ForAsync(Guid accountId, CancellationToken cancellationToken = default);
-}
-
-/// <summary>Exports go on the security log (ADR 0043).</summary>
-public interface IExportAudit
-{
-    /// <summary>
-    /// One export: what was exported (records, projects…), from which project, the query and columns, the format, and
-    /// how many rows of how many (with the limit, when it cut the file short).
-    /// </summary>
-    Task ExportedAsync(AccountInfo? person, Guid accountId, string? ip, string entity, string? projectKey, string rql, IReadOnlyList<string>? columns,
-        string format, int rows, int total, int? limit, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Organizations (ADR 0037) from an import: the one it made before, else the one with that name, else a new one.</summary>

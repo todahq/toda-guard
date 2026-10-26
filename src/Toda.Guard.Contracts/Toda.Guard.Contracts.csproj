@@ -5,10 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The catalog's event base (CatalogEvent) and its handler interfaces (ADR 0047). -->
-    <ProjectReference Include="..\Toda.Sdk\Toda.Sdk.csproj" />
-    <!-- Abilities (IAbilities) and a person's query clock (IQueryClocks) for other modules (ADR 0047 step 5). -->
-    <ProjectReference Include="..\Toda.Query\Toda.Query.csproj" />
+    <!-- Abilities (IAbilities) for other modules (ADR 0047 step 5). Nothing of Toda's: Guard is a package (ADR 0087). -->
     <PackageReference Include="Casl.Net" Version="0.1.0" />
   </ItemGroup>
 

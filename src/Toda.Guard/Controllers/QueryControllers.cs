@@ -66,7 +66,7 @@ public class GuardQueryController(GuardDb guardDb, IAccountLookup accounts, IMem
                 await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction snapshot = await QueryExports.SnapshotAsync(db, cancellationToken);
                 return await EntityQueryEngine.ExportAsync(rows(db, ability), await model(db), input, Context(), exports.Limit(input.MaxRows), formatting, async (head, ct) =>
                 {
-                    await securityLog.ExportedAsync(me, CurrentAccountId, ClientIp, entity, null, EntityQueryEngine.Rql(input), input.Columns, format.ToString().ToLowerInvariant(), head, ct);
+                    await securityLog.ExportedAsync(me?.Username, CurrentAccountId, ClientIp, entity, null, EntityQueryEngine.Rql(input), input.Columns, format.ToString().ToLowerInvariant(), head, ct);
                     string sheet = char.ToUpperInvariant(entity[0]) + entity[1..];
                     return await QueryExports.StartAsync(Response, format, QueryExports.FileStem(entity, null, formatting.Zone), sheet, head, ct);
                 }, cancellationToken);

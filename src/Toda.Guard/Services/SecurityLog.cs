@@ -2,6 +2,7 @@ using System.Text.Json;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Toda.Platform.Acting;
+using Toda.Platform.Query;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
@@ -119,13 +120,13 @@ public class SecurityLog(GuardDb guardDb, ActingContext acting) : ITransientDepe
     /// One export, said in JSON: what was exported (records, projects, accounts or groups), from which project, the
     /// query and columns, the format, and how many rows of how many (with the limit, when it cut the file short).
     /// </summary>
-    public Task ExportedAsync(AccountInfo? person, Guid accountId, string? ip, string entity, string? projectKey, string rql, IReadOnlyList<string>? columns, string format,
-        Toda.Platform.Query.QueryExportHead head, CancellationToken cancellationToken = default) =>
-        ExportedAsync(person, accountId, ip, entity, projectKey, rql, columns, format, head.Rows, head.Total, head.Truncated ? head.Limit : null, cancellationToken);
+    public Task ExportedAsync(string? username, Guid accountId, string? ip, string entity, string? projectKey, string rql, IReadOnlyList<string>? columns, string format,
+        QueryExportHead head, CancellationToken cancellationToken = default) =>
+        ExportedAsync(username, accountId, ip, entity, projectKey, rql, columns, format, head.Rows, head.Total, head.Truncated ? head.Limit : null, cancellationToken);
 
-    public Task ExportedAsync(AccountInfo? person, Guid accountId, string? ip, string entity, string? projectKey, string rql, IReadOnlyList<string>? columns,
+    public Task ExportedAsync(string? username, Guid accountId, string? ip, string entity, string? projectKey, string rql, IReadOnlyList<string>? columns,
         string format, int rows, int total, int? limit, CancellationToken cancellationToken = default) =>
-        WriteAsync(QueryExport, person?.Username, accountId, JsonSerializer.Serialize(new
+        WriteAsync(QueryExport, username, accountId, JsonSerializer.Serialize(new
         {
             entity,
             project = projectKey,
