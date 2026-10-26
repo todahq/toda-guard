@@ -65,7 +65,6 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
 
         List<MergePartDto> parts = [];
         parts.Add(new MergePartDto("guard", false, Dto(await guardDb.RunAsync(db => GuardCountsAsync(db, source, survivor, ct), cancellationToken: ct)), null));
-        parts.Add(new MergePartDto("platform", false, Dto(await guardDb.RunAsync(db => PlatformMerge.CountAsync(db, sourceId, ct), cancellationToken: ct)), null));
         await using (ExtensionLease<IAccountMergeParticipant> lease = runtime.LeaseExtensions<IAccountMergeParticipant>(services))
         {
             foreach ((string? plugin, IAccountMergeParticipant participant) in lease.Items)
@@ -111,7 +110,7 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
             bool wasActive = source.Status == AccountStatus.Active;
             AccountMergeRecord record = db.Merges.Add(new AccountMergeRecord(Guid.NewGuid(), source, survivor, actorId, reason)).Entity;
             AccountMerge merge = new(record.Id, source.Id, source.Username, survivor.Id, survivor.Username, survivor.DisplayName);
-            List<MergeStep> steps = [Step("platform", false, await PlatformMerge.MoveAsync(db, source.Id, survivor.Id, ct))];
+            List<MergeStep> steps = [];
             foreach ((string key, IAccountMergeParticipant participant) in host)
             {
                 steps.Add(Step(key, false, await participant.MergeAsync(merge, ct))); // same unit of work: same transaction
@@ -492,116 +491,4 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
         (participant.GetType().Namespace ?? "host").Split('.') is [_, var module, ..] ? module.ToLowerInvariant() : "host";
 
     private static DateTime Max(DateTime a, DateTime b) => a > b ? a : b;
-}
-
-/// <summary>
-/// Platform's rows that name an account (ADR 0044): mail logged to it, the texts and templates it last changed, and since
-/// M7 and M8 its notices and notification choices, its channel addresses and git accounts, its phones (ADR 0062), and
-/// what it ran or set up (AI and tool calls, scripts, skills, smart commits, jobs, backfills, connections, channels,
-/// repositories). Where both accounts have one of something there can be one of (a notice of an event, choices, an
-/// address on a channel), the survivor's stays.
-/// </summary>
-internal static class PlatformMerge
-{
-    /// <summary>Columns naming who ran or set something up: moved as they are.</summary>
-    private static readonly (string Table, string Column)[] Activity =
-    [
-        ("ai_usage", "AccountId"),
-        ("outside_tool_calls", "AccountId"),
-        ("script_runs", "AccountId"),
-        ("skill_runs", "AccountId"),
-        ("smart_commit_runs", "AccountId"),
-        ("jobs", "StartedBy"),
-        ("repository_backfills", "StartedBy"),
-        ("connections", "CreatedBy"),
-        ("channel_targets", "CreatedBy"),
-        ("repositories", "CreatedBy"),
-        ("repository_links", "LinkedBy"),
-        ("plugin_publishers", "AddedBy"),
-        ("backup_settings", "UpdatedBy"),
-        ("backup_runs", "RequestedBy"),
-        ("backup_downloads", "RequestedBy"),
-    ];
-
-    public static async Task<IReadOnlyList<AccountMergeCount>> MoveAsync(GuardDbContext db, Guid source, Guid survivor, CancellationToken ct)
-    {
-        int notices = await Run(db, $"""
-            DELETE FROM platform.notices x WHERE x."AccountId" = {source}
-            AND EXISTS (SELECT 1 FROM platform.notices o WHERE o."EventId" = x."EventId" AND o."AccountId" = {survivor})
-            """, ct);
-        notices += await Run(db, $"""UPDATE platform.notices SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct);
-        await Run(db, $"""UPDATE platform.notices SET "ActorId" = {survivor} WHERE "ActorId" = {source}""", ct);
-
-        int settings = await Run(db, $"""
-            DELETE FROM platform.notification_settings x WHERE x."AccountId" = {source}
-            AND EXISTS (SELECT 1 FROM platform.notification_settings o WHERE o."AccountId" = {survivor})
-            """, ct);
-        settings += await Run(db, $"""UPDATE platform.notification_settings SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct);
-        settings += await Run(db, $"""
-            DELETE FROM platform.channel_addresses x WHERE x."AccountId" = {source}
-            AND EXISTS (SELECT 1 FROM platform.channel_addresses o WHERE o."Channel" = x."Channel" AND o."AccountId" = {survivor})
-            """, ct);
-        settings += await Run(db, $"""UPDATE platform.channel_addresses SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct);
-
-        // Phones (ADR 0062) go to the survivor; its address on the push channel is the survivor itself, so that's set too.
-        int devices = await Run(db, $"""UPDATE platform.devices SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct);
-        if (devices > 0)
-        {
-            DateTime now = DateTime.UtcNow;
-            string address = survivor.ToString();
-            await Run(db, $"""
-                INSERT INTO platform.channel_addresses ("AccountId", "Channel", "Address", "VerifiedAt", "CodeTries", "UpdatedAt")
-                VALUES ({survivor}, 'push', {address}, {now}, 0, {now})
-                ON CONFLICT ("AccountId", "Channel") DO UPDATE SET "Address" = EXCLUDED."Address", "VerifiedAt" = EXCLUDED."VerifiedAt", "UpdatedAt" = EXCLUDED."UpdatedAt"
-                """, ct);
-        }
-
-        int activity = 0;
-        foreach ((string table, string column) in Activity)
-        {
-#pragma warning disable S2077, EF1002 // the table and column come from the list above, not a request; the values are parameters
-            activity += await db.Database.ExecuteSqlRawAsync($"""UPDATE platform.{table} SET "{column}" = @p0 WHERE "{column}" = @p1""", [survivor, source], ct);
-#pragma warning restore S2077, EF1002
-        }
-
-        return
-        [
-            new("mail", await Run(db, $"""UPDATE platform.mail_log SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct)),
-            new("texts", await Run(db, $"""UPDATE platform.text_overrides SET "UpdatedBy" = {survivor} WHERE "UpdatedBy" = {source}""", ct)
-                + await Run(db, $"""UPDATE platform.message_templates SET "UpdatedBy" = {survivor} WHERE "UpdatedBy" = {source}""", ct)),
-            new("notices", notices),
-            new("settings", settings),
-            new("git", await Run(db, $"""UPDATE platform.git_accounts SET "AccountId" = {survivor} WHERE "AccountId" = {source}""", ct)),
-            new("devices", devices),
-            new("activity", activity),
-        ];
-    }
-
-    public static async Task<IReadOnlyList<AccountMergeCount>> CountAsync(GuardDbContext db, Guid source, CancellationToken ct)
-    {
-        int activity = 0;
-        foreach ((string table, string column) in Activity)
-        {
-#pragma warning disable S2077, EF1002 // the table and column come from the list above, not a request; the values are parameters
-            activity += await db.Database.SqlQueryRaw<int>($"""SELECT count(*)::int AS "Value" FROM platform.{table} WHERE "{column}" = @p0""", source).SingleAsync(ct);
-#pragma warning restore S2077, EF1002
-        }
-
-        return
-        [
-            new("mail", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.mail_log WHERE "AccountId" = {source}""", ct)),
-            new("texts", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.text_overrides WHERE "UpdatedBy" = {source}""", ct)
-                + await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.message_templates WHERE "UpdatedBy" = {source}""", ct)),
-            new("notices", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.notices WHERE "AccountId" = {source}""", ct)),
-            new("settings", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.notification_settings WHERE "AccountId" = {source}""", ct)
-                + await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.channel_addresses WHERE "AccountId" = {source}""", ct)),
-            new("git", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.git_accounts WHERE "AccountId" = {source}""", ct)),
-            new("devices", await Count(db, $"""SELECT count(*)::int AS "Value" FROM platform.devices WHERE "AccountId" = {source}""", ct)),
-            new("activity", activity),
-        ];
-    }
-
-    private static Task<int> Run(GuardDbContext db, FormattableString sql, CancellationToken ct) => db.Database.ExecuteSqlInterpolatedAsync(sql, ct);
-
-    private static Task<int> Count(GuardDbContext db, FormattableString sql, CancellationToken ct) => db.Database.SqlQuery<int>(sql).SingleAsync(ct);
 }
