@@ -101,7 +101,7 @@ public static class SelfServiceMail
 /// </summary>
 [ExposeServices(typeof(SelfService), typeof(ICustomerAccounts))]
 public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IChannels channels, IConfiguration configuration,
-    IEventPublisher events, AccountMergeService merges, SecurityLog audit) : ITransientDependency, ICustomerAccounts
+    IGuardEventSink events, AccountMergeService merges, SecurityLog audit) : ITransientDependency, ICustomerAccounts
 {
     public static readonly TimeSpan VerifyFor = TimeSpan.FromHours(72);
     public static readonly TimeSpan ResetFor = TimeSpan.FromHours(1);

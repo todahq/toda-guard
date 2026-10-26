@@ -62,7 +62,7 @@ public abstract class GuardControllerBase : AbpControllerBase
 
     protected async Task PublishAsync(IEnumerable<object> events)
     {
-        IEventPublisher publisher = HttpContext.RequestServices.GetRequiredService<IEventPublisher>();
+        IGuardEventSink publisher = HttpContext.RequestServices.GetRequiredService<IGuardEventSink>();
         foreach (object e in events)
         {
             await GuardEvents.PublishAsync(publisher, e);
@@ -72,7 +72,7 @@ public abstract class GuardControllerBase : AbpControllerBase
 
 public static class GuardEvents
 {
-    public static Task PublishAsync(IEventPublisher publisher, object e, CancellationToken cancellationToken = default) => e switch
+    public static Task PublishAsync(IGuardEventSink publisher, object e, CancellationToken cancellationToken = default) => e switch
     {
         AccountCreatedEto x => publisher.PublishAsync(x, cancellationToken),
         AccountUpdatedEto x => publisher.PublishAsync(x, cancellationToken),

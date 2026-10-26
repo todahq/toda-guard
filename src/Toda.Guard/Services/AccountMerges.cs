@@ -51,7 +51,7 @@ public sealed record DuplicateDto(string Email, List<AccountSummaryDto> Accounts
 /// move their rows in one transaction; plugins' participants follow, each on its own, and a merge they didn't finish can
 /// be resumed. The source stays: inactive, merged into the survivor, with its username.
 /// </summary>
-public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServiceProvider services, IEventPublisher events, ILogger<AccountMergeService> logger)
+public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServiceProvider services, IGuardEventSink events, ILogger<AccountMergeService> logger)
     : ITransientDependency
 {
     public async Task<MergePreviewDto> PreviewAsync(Guid sourceId, Guid survivorId, Guid? actorId, CancellationToken ct)

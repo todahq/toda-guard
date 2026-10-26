@@ -13,7 +13,7 @@ namespace Toda.Guard.Services;
 /// add them, so later syncs and domain rules leave them be; members it has already stay.
 /// </summary>
 [ExposeServices(typeof(OrganizationImport), typeof(IOrganizationImport))]
-public class OrganizationImport(GuardDb guardDb, IEventPublisher events) : ITransientDependency, IOrganizationImport
+public class OrganizationImport(GuardDb guardDb, IGuardEventSink events) : ITransientDependency, IOrganizationImport
 {
     public async Task<Guid> EnsureAsync(Guid? known, string name, IReadOnlyCollection<Guid> members, CancellationToken cancellationToken)
     {

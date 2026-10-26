@@ -20,9 +20,9 @@ public class DirectorySyncService(
     GuardDb guardDb,
     ConnectorCatalog connectors,
     AccountProjector projector,
-    IEventPublisher events,
+    IGuardEventSink events,
     AccountMergeService merges,
-    ClusterLocks clusterLocks,
+    IGuardLocks clusterLocks,
     ILogger<DirectorySyncService> logger) : ITransientDependency
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> Locks = new();

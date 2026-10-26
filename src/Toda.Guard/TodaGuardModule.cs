@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -40,11 +41,16 @@ public class TodaGuardModule : AbpModule
         : request.Headers.Authorization.Count == 0 && WebSessionHandler.Carries(request) ? WebSessionHandler.SchemeName
         : OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme;
 
+    /// <summary>What Guard's outbox carries (ADR 0087): every concrete GuardEvent, the contracts' *Eto records.</summary>
+    public static bool Carries(Type type) => typeof(GuardEvent).IsAssignableFrom(type) && !type.IsAbstract;
+
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
         IConfiguration configuration = context.Services.GetConfiguration();
 
         context.Services.AddAbpDbContext<GuardDbContext>();
+        // Where Guard's events go (ADR 0087): ABP's distributed bus and Guard's outbox, unless the host says otherwise.
+        context.Services.TryAddTransient<IGuardEventSink, DistributedGuardEventSink>();
         Configure<AbpDbContextOptions>(options =>
             options.Configure<GuardDbContext>(c => c.UseNpgsql(npgsql =>
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", GuardDbContext.Schema))));
@@ -53,7 +59,7 @@ public class TodaGuardModule : AbpModule
             outbox.UseDbContext<GuardDbContext>();
             // The outbox sender's lock is named after this: the module's own, or Projects' sender and this one wait on each other.
             outbox.DatabaseName = GuardDbContext.Schema;
-            outbox.Selector = type => EventCatalogOptions.IsEvent(type, typeof(AccountCreatedEto).Assembly);
+            outbox.Selector = Carries;
         }));
 
         // Sign-in: OpenIddict issues short-lived access tokens and rotating refresh tokens to the

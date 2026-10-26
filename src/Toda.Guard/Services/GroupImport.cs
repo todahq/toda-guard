@@ -14,7 +14,7 @@ namespace Toda.Guard.Services;
 /// source's, as <see cref="MembershipSource.Import"/> members; members an admin added by hand stay.
 /// </summary>
 [ExposeServices(typeof(GroupImport), typeof(IGroupImport))]
-public class GroupImport(GuardDb guardDb, IEventPublisher events) : ITransientDependency, IGroupImport
+public class GroupImport(GuardDb guardDb, IGuardEventSink events) : ITransientDependency, IGroupImport
 {
     private static string ExternalId(string source, string name) => $"import:{source}:{GuardConstants.Normalize(name.Trim())}";
 

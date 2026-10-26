@@ -14,7 +14,7 @@ namespace Toda.Guard.Services;
 /// people (ADR 0071): active accounts in the internal directory, made as an admin makes one.
 /// </summary>
 [ExposeServices(typeof(IAccountProvisioning))]
-public class AccountProvisioning(GuardDb guardDb, AccountProjector projector, IMembershipResolver membership, IEventPublisher events,
+public class AccountProvisioning(GuardDb guardDb, AccountProjector projector, IMembershipResolver membership, IGuardEventSink events,
     AccountMergeService merges, SecurityLog audit) : IAccountProvisioning, ITransientDependency
 {
     public async Task<ProvisionedAccount> EnsureInternalAccountAsync(Guid callerId, string username, string displayName, string? email, string? password,
