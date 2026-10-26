@@ -33,17 +33,17 @@ public sealed record ResetPasswordInput(string Token, string Password);
 /// <summary>The mails self-service sends (ADR 0037, 0039): confirming an email, and resetting a password.</summary>
 public static class SelfServiceMail
 {
-    public const string Verify = "guard.signup-verify";
-    public const string Reset = "guard.password-reset";
+    public const string Verify = GuardMessageKinds.SignUpVerify;
+    public const string Reset = GuardMessageKinds.PasswordReset;
 
     private static Dictionary<string, string> Text(string en, string ar) => new() { ["en"] = en, ["ar"] = ar };
 
-    public static readonly MessageTemplateDefinition VerifyDefinition = new(
+    public static readonly GuardMessageTemplate VerifyDefinition = new(
         Verify,
-        TemplateKinds.Email,
+        Email: true,
         Text("Confirm your email", "تأكيد البريد"),
         Text("Sent when someone signs up: their account is active once they follow the link.", "تُرسل عند التسجيل: يصبح الحساب فعّالًا عند فتح الرابط."),
-        new Dictionary<string, TemplateText>
+        new Dictionary<string, GuardTemplateText>
         {
             ["en"] = new("Confirm your email for Toda",
                 "Hello {{ recipient.name }},\n\nConfirm your email to finish creating your account:\n\n[Confirm my email]({{ link }})\n\n"
@@ -64,12 +64,12 @@ public static class SelfServiceMail
             ["hours"] = 72,
         });
 
-    public static readonly MessageTemplateDefinition ResetDefinition = new(
+    public static readonly GuardMessageTemplate ResetDefinition = new(
         Reset,
-        TemplateKinds.Email,
+        Email: true,
         Text("Reset a password", "إعادة تعيين كلمة المرور"),
         Text("Sent when someone asks to reset the password of an account Toda keeps.", "تُرسل عند طلب إعادة تعيين كلمة مرور حساب يحفظه تودا."),
-        new Dictionary<string, TemplateText>
+        new Dictionary<string, GuardTemplateText>
         {
             ["en"] = new("Reset your Toda password",
                 "Hello {{ recipient.name }},\n\nSomeone asked to reset the password of the Toda account {{ username }}. To choose a new one:\n\n[Reset my password]({{ link }})\n\n"
@@ -100,7 +100,7 @@ public static class SelfServiceMail
 /// changes. Answers never say whether an email has an account, except sign-up, which has to.
 /// </summary>
 [ExposeServices(typeof(SelfService), typeof(ICustomerAccounts))]
-public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IChannels channels, IOptions<GuardOptions> options,
+public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IGuardMessenger messenger, IGuardSiteDefaults siteDefaults, IOptions<GuardOptions> options,
     IGuardEventSink events, AccountMergeService merges, SecurityLog audit) : ITransientDependency, ICustomerAccounts
 {
     public static readonly TimeSpan VerifyFor = TimeSpan.FromHours(72);
@@ -368,8 +368,8 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
     }
 
     private async Task SendAsync(string template, DirectoryUser user, Dictionary<string, object?> model, CancellationToken ct, string? to = null) =>
-        await channels.SendAsync(new ChannelMessage(template, [ChannelRecipient.Address(to ?? user.Email!, user.DisplayName)], model,
-            Language: LanguageChain.Current.Language, Source: template == SelfServiceMail.Verify ? "signup" : "password-reset"), ct);
+        await messenger.SendAsync(new GuardMessage(template, null, to ?? user.Email!, user.DisplayName, model,
+            siteDefaults.RequestLanguage, template == SelfServiceMail.Verify ? "signup" : "password-reset"), ct);
 
     private static void Password(string? password)
     {

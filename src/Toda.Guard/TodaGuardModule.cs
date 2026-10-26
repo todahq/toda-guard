@@ -61,6 +61,8 @@ public class TodaGuardModule : AbpModule
         // No tools for tokens to be limited to, and no challenge on sign-up, unless the host has them.
         context.Services.TryAddTransient<ITokenRestrictions, NoTokenRestrictions>();
         context.Services.TryAddTransient<ISignUpChallenges, NoSignUpChallenges>();
+        // How Guard reaches people (ADR 0087): its own texts to a pickup folder, unless the host sends them its way.
+        context.Services.TryAddTransient<IGuardMessenger, PickupGuardMessenger>();
         Configure<AbpDbContextOptions>(options =>
             options.Configure<GuardDbContext>(c => c.UseNpgsql(npgsql =>
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", GuardDbContext.Schema))));

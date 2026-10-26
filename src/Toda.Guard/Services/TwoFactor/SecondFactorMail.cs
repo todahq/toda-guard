@@ -1,19 +1,18 @@
-using Toda.Sdk;
-
 namespace Toda.Guard.Services.TwoFactor;
 
 /// <summary>
 /// The code of a second step, sent by email or as a message by SMS or WhatsApp (ADR 0082). Sent as a secret: the mail
-/// log keeps it without its text. An admin may reword either in Administration › Templates; the code must stay in it.
+/// log keeps it without its text. These are the package's own texts (ADR 0087); Toda's admins may reword either in
+/// Administration › Templates, and the code must stay in it.
 /// </summary>
 public static class SecondFactorMail
 {
-    public const string Code = "guard.second-factor-code";
-    public const string CodeMessage = Code + ".message";
+    public const string Code = GuardMessageKinds.SecondFactorCode;
+    public const string CodeMessage = GuardMessageKinds.SecondFactorCodeMessage;
 
     private static Dictionary<string, string> Text(string en, string ar) => new() { ["en"] = en, ["ar"] = ar };
 
-    private static readonly TemplateVariable[] Variables =
+    private static readonly GuardTemplateVariable[] Variables =
     [
         new("recipient.name", Text("The person signing in", "الشخص الذي يسجّل الدخول")),
         new("code", Text("The code: six digits", "الرمز: ستة أرقام")),
@@ -29,13 +28,13 @@ public static class SecondFactorMail
         ["site"] = "Toda (toda.example)",
     };
 
-    public static readonly MessageTemplateDefinition CodeDefinition = new(
+    public static readonly GuardMessageTemplate CodeDefinition = new(
         Code,
-        TemplateKinds.Email,
+        Email: true,
         Text("Sign-in code", "رمز تسجيل الدخول"),
         Text("Sent when someone signing in, or confirming it's them, asks for a code by email (two-factor sign-in).",
             "تُرسل عندما يطلب من يسجّل الدخول، أو يؤكد هويته، رمزًا بالبريد (التحقق بخطوتين)."),
-        new Dictionary<string, TemplateText>
+        new Dictionary<string, GuardTemplateText>
         {
             ["en"] = new("{{ code }} is your {{ site }} code",
                 "Hello {{ recipient.name }},\n\nYour code to sign in to {{ site }}:\n\n**{{ code }}**\n\n"
@@ -47,12 +46,12 @@ public static class SecondFactorMail
         Variables,
         Sample());
 
-    public static readonly MessageTemplateDefinition CodeMessageDefinition = new(
+    public static readonly GuardMessageTemplate CodeMessageDefinition = new(
         CodeMessage,
-        TemplateKinds.Message,
+        Email: false,
         Text("Sign-in code (message)", "رمز تسجيل الدخول (رسالة)"),
         Text("The sign-in code in a line, for someone who asks for it by SMS or WhatsApp.", "رمز تسجيل الدخول في سطر، لمن يطلبه عبر الرسائل القصيرة أو واتساب."),
-        new Dictionary<string, TemplateText>
+        new Dictionary<string, GuardTemplateText>
         {
             ["en"] = new(null, "{{ code }} is your {{ site }} code. It works for {{ minutes }} minutes. Don't share it."),
             ["ar"] = new(null, "{{ code }} رمزك في {{ site }}. يعمل لمدة {{ minutes }} دقائق. لا تشاركه مع أحد."),

@@ -7,7 +7,6 @@ using Microsoft.Extensions.Logging;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Toda.Platform.Acting;
-using Toda.Sdk;
 using QRCoder;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
@@ -72,9 +71,7 @@ public sealed class SecondFactors(
     SecurityLog audit,
     IConfiguration configuration,
     IOptions<GuardOptions> options,
-    IChannels channels,
-    Toda.Platform.Channels.ChannelAddressBook addressBook,
-    Toda.Platform.Mail.EmailChannel email,
+    IGuardMessenger messenger,
     ILogger<SecondFactors> logger) : ITransientDependency
 {
     public const int RecoveryCodeCount = 10;
@@ -351,17 +348,14 @@ public sealed class SecondFactors(
             return [];
         }
 
+        // What reaches the person (the messenger's to say: email when mail can go out, a channel where their address is
+        // verified), kept to the methods the site allows.
         Dictionary<string, SecondFactorSenderDto> found = [];
-        if (allowed.Contains(SecondFactorKinds.Email) && (account.MailTo ?? account.Email) is { Length: > 0 } address && await email.ReadyAsync(cancellationToken))
+        foreach (GuardChannel way in await messenger.ReachAsync(account.Id, account.MailTo ?? account.Email, cancellationToken))
         {
-            found[SecondFactorKinds.Email] = new(SecondFactorKinds.Email, "Email", MaskEmail(address));
-        }
-
-        foreach (Toda.Platform.Channels.MyChannelDto channel in await addressBook.MineAsync(account.Id, cancellationToken))
-        {
-            if (allowed.Contains(channel.Channel) && channel is { Ready: true, Verified: true, Address: { } number })
+            if (allowed.Contains(way.Method))
             {
-                found[channel.Channel] = new(channel.Channel, channel.Name, MaskNumber(number));
+                found[way.Method] = new(way.Method, way.Name, way.Method == SecondFactorKinds.Email ? MaskEmail(way.Address) : MaskNumber(way.Address));
             }
         }
 
@@ -435,13 +429,17 @@ public sealed class SecondFactors(
             await limits.AddAsync($"second-factor-send|{ticketKey}", cancellationToken);
         }
 
-        ChannelSendResult result = await channels.SendAsync(new ChannelMessage(
+        // A secret (ADR 0082): delivered as rendered, now and once, kept nowhere in the clear, never tried again.
+        GuardSendResult result = await messenger.SendAsync(new GuardMessage(
             sender.Method == SecondFactorKinds.Email ? SecondFactorMail.Code : SecondFactorMail.CodeMessage,
-            [ChannelRecipient.Person(accountId)],
+            accountId,
+            null,
+            null,
             new Dictionary<string, object?> { ["code"] = code, ["minutes"] = (int)SentCode.Lifetime.TotalMinutes, ["site"] = Issuer },
-            Source: "second-factor",
+            null,
+            "second-factor",
             Channel: sender.Method == SecondFactorKinds.Email ? null : sender.Method,
-            Retry: false) { Secret = true }, cancellationToken);
+            Secret: true), cancellationToken);
         await audit.WriteAsync(SecurityAuditTypes.SecondFactorCodeSent, username, accountId, result.Sent > 0 ? sender.Method : $"{sender.Method}: not sent", ip, cancellationToken);
         return result.Sent > 0
             ? new SendCodeResult(new CodeSentDto(sender.Method, sender.To, DateTime.UtcNow + SentCode.Lifetime), null)

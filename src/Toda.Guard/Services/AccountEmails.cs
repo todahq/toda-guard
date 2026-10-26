@@ -82,16 +82,16 @@ public sealed record MailToInput(string? Email);
 /// <summary>The mail that confirms an address someone added to their account (ADR 0044).</summary>
 public static class AddressMail
 {
-    public const string Verify = "guard.email-verify";
+    public const string Verify = GuardMessageKinds.AddressVerify;
 
     private static Dictionary<string, string> Text(string en, string ar) => new() { ["en"] = en, ["ar"] = ar };
 
-    public static readonly MessageTemplateDefinition VerifyDefinition = new(
+    public static readonly GuardMessageTemplate VerifyDefinition = new(
         Verify,
-        TemplateKinds.Email,
+        Email: true,
         Text("Confirm an added address", "تأكيد عنوان مضاف"),
         Text("Sent when someone adds an address to their account: it counts once they follow the link.", "تُرسل عند إضافة عنوان إلى حساب: يُعتمد عند فتح الرابط."),
-        new Dictionary<string, TemplateText>
+        new Dictionary<string, GuardTemplateText>
         {
             ["en"] = new("Confirm {{ address }} for Toda",
                 "Hello {{ recipient.name }},\n\nConfirm that {{ address }} is yours, to add it to the Toda account {{ username }}:\n\n[Confirm this address]({{ link }})\n\n"
@@ -122,7 +122,7 @@ public static class AddressMail
 /// follow a link mailed to the address. A verified address belongs to one account: adding one another account has is
 /// refused, except a placeholder's, which is then merged into this account.
 /// </summary>
-public class AccountEmailService(GuardDb guardDb, IDataProtectionProvider protection, IChannels channels, IOptions<GuardOptions> options, AccountMergeService merges)
+public class AccountEmailService(GuardDb guardDb, IDataProtectionProvider protection, IGuardMessenger messenger, IGuardSiteDefaults siteDefaults, IOptions<GuardOptions> options, AccountMergeService merges)
     : ITransientDependency
 {
     public const int MaxAddresses = 20;
@@ -184,14 +184,14 @@ public class AccountEmailService(GuardDb guardDb, IDataProtectionProvider protec
         }, requiresNew: true, ct);
 
         string token = Verifier.Protect(row.Id.ToString("N"), VerifyFor);
-        await channels.SendAsync(new ChannelMessage(AddressMail.Verify, [ChannelRecipient.Address(row.Email, account.DisplayName)],
+        await messenger.SendAsync(new GuardMessage(AddressMail.Verify, null, row.Email, account.DisplayName,
             new Dictionary<string, object?>
             {
                 ["address"] = row.Email,
                 ["username"] = account.Username,
                 ["link"] = $"{Site}/emails/verify#token={token}",
                 ["hours"] = (int)VerifyFor.TotalHours,
-            }, Language: account.Language ?? LanguageChain.Current.Language, Source: "address-verify"), ct);
+            }, account.Language ?? siteDefaults.RequestLanguage, "address-verify"), ct);
         return await ListAsync(accountId, ct);
     }
 
