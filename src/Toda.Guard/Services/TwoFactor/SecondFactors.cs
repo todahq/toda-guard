@@ -7,7 +7,6 @@ using Microsoft.Extensions.Logging;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Toda.Platform.Acting;
-using Toda.Platform.Limits;
 using Toda.Sdk;
 using QRCoder;
 using Volo.Abp;
@@ -61,14 +60,14 @@ public sealed record SecondStepResult(SecondStepPassed? Passed, string? Error);
 /// A second factor (ADR 0082): which people are asked (the strictest mode of their groups, or having set one up), the
 /// tickets of the second step, the authenticator app and recovery codes, setting up, removing and an admin's reset. The
 /// app's secret is encrypted with the site's key ring; tickets and recovery codes are kept as their SHA-256. Wrong codes
-/// count for the whole site (<see cref="SiteLimits"/>), ten in 15 minutes per person, and five per ticket.
+/// count for the whole site (<see cref="IGuardRateLimits"/>), ten in 15 minutes per person, and five per ticket.
 /// <c>Guard:TwoFactor:Disabled</c> asks no one: the emergency switch, for a site whose admins all lost their phones.
 /// </summary>
 public sealed class SecondFactors(
     GuardDb guardDb,
     MembershipGraph graph,
     IDataProtectionProvider protection,
-    SiteLimits limits,
+    IGuardRateLimits limits,
     SecurityLog audit,
     IConfiguration configuration,
     IChannels channels,

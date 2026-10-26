@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
-using Toda.Platform.Limits;
 using Toda.Sdk;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
@@ -400,9 +399,9 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
 
 /// <summary>
 /// Limits what anyone can ask of the sign-up and reset endpoints from one address: 10 an action in 15 minutes, and 3 mails
-/// to one email address an hour. Counted for the whole site (<see cref="SiteLimits"/>), like the sign-in limiter.
+/// to one email address an hour. Counted for the whole site (<see cref="IGuardRateLimits"/>), like the sign-in limiter.
 /// </summary>
-public class SelfServiceLimiter(SiteLimits limits) : ISingletonDependency
+public class SelfServiceLimiter(IGuardRateLimits limits) : ISingletonDependency
 {
     public async Task<bool> AllowAsync(string action, string? ip, string? email, CancellationToken cancellationToken = default)
     {

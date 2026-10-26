@@ -53,6 +53,8 @@ public class TodaGuardModule : AbpModule
         context.Services.TryAddTransient<IGuardEventSink, DistributedGuardEventSink>();
         // Locks every server shares (ADR 0087): Postgres advisory locks on Guard's database, unless the host gives its own.
         context.Services.TryAddSingleton<IGuardLocks, PostgresGuardLocks>();
+        // What Guard's limits count with (ADR 0087): guard.rate_limits, unless the host gives its own.
+        context.Services.TryAddSingleton<IGuardRateLimits, PostgresGuardRateLimits>();
         Configure<AbpDbContextOptions>(options =>
             options.Configure<GuardDbContext>(c => c.UseNpgsql(npgsql =>
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", GuardDbContext.Schema))));

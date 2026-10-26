@@ -57,6 +57,12 @@ public sealed class GuardPersonalData : IPersonalDataDeclarations, ITransientDep
                 "تغييرات الحسابات والمجموعات التي تنتظر الوصول إلى الوحدات الأخرى والإضافات وخطافات الويب، وفيها الحسابات."),
             ["guard.AbpEventOutbox"], [],
             PersonalDataSubjects.Accounts, [Identity, Activity], PersonalDataKept.UntilDone, [To.Webhooks], []),
+        new("guard.limits", Owner,
+            new("Counts against abuse", "عدّادات منع الإساءة"),
+            new("Failed sign-ins and other tries counted by address, email or account, kept only as hashes for a day, when the site counts them in Guard's own table rather than the host's.",
+                "محاولات الدخول الفاشلة وغيرها معدودة حسب العنوان أو البريد أو الحساب، محفوظة مجزّأة ليوم واحد فقط، حين يعدّها الموقع في جدول Guard نفسه لا في جدول المضيف."),
+            ["guard.rate_limits"], [],
+            PersonalDataSubjects.Both, [Security], PersonalDataKept.Days(1), [], []),
     ];
 
     public IReadOnlyList<NonPersonalTable> NotPersonal { get; } =

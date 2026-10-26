@@ -3,16 +3,15 @@ using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Data;
 using Toda.Guard.Directories;
 using Toda.Guard.Domain;
-using Toda.Platform.Limits;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
 
 /// <summary>
 /// Brute-force limit per username and per IP: 5 failures in 15 minutes blocks for 15 minutes (20 per IP). Counted for
-/// the whole site (<see cref="SiteLimits"/>), so several servers allow no more than one.
+/// the whole site (<see cref="IGuardRateLimits"/>), so several servers allow no more than one.
 /// </summary>
-public class LoginRateLimiter(SiteLimits limits) : ISingletonDependency
+public class LoginRateLimiter(IGuardRateLimits limits) : ISingletonDependency
 {
     private const int MaxFailures = 5;
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(15);

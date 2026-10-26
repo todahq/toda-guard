@@ -59,7 +59,7 @@ public static class OAuthAgents
 /// for other systems, public or confidential. A person sees and revokes the apps they've allowed.
 /// </summary>
 public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenIddictAuthorizationManager authorizations, IOpenIddictTokenManager tokens,
-    ISecurityAudit audit, Toda.Platform.Limits.SiteLimits limits) : ITransientDependency
+    ISecurityAudit audit, IGuardRateLimits limits) : ITransientDependency
 {
     private const int RegistrationsPerHour = 20;
 
