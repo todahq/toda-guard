@@ -59,6 +59,10 @@ public static class SecurityAuditTypes
     public const string RecoveryCodesRenewed = "account.recovery-codes.renewed";
     public const string GroupTwoFactor = "group.two-factor";
 
+    /// <summary>A second step's code sent by email or a channel (ADR 0082), and which methods the site allows.</summary>
+    public const string SecondFactorCodeSent = "auth.second-factor.code-sent";
+    public const string SecondFactorMethods = "settings.second-factor-methods";
+
     /// <summary>A person allowed an app to act for them, or took that back.</summary>
     public const string OAuthConsentGranted = "oauth.consent.granted";
     public const string OAuthConsentRevoked = "oauth.consent.revoked";

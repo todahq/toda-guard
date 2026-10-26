@@ -166,6 +166,8 @@ public class TodaGuardModule : AbpModule
         templates.Register(SelfServiceMail.VerifyDefinition);
         templates.Register(SelfServiceMail.ResetDefinition);
         templates.Register(AddressMail.VerifyDefinition);
+        templates.Register(Services.TwoFactor.SecondFactorMail.CodeDefinition); // a second step's code (ADR 0082)
+        templates.Register(Services.TwoFactor.SecondFactorMail.CodeMessageDefinition);
 
         // A test site shows accounts' passwords on its sign-in page: said once at start, so a site people use doesn't by mistake.
         if (context.ServiceProvider.GetRequiredService<TestAccounts>().List() is { Count: > 0 } shown)

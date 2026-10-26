@@ -14,6 +14,39 @@ public sealed record SecondFactorConfirmInput(string? Code, string? Ticket = nul
 /// <summary>New recovery codes, shown this once.</summary>
 public sealed record RecoveryCodesDto(List<string> RecoveryCodes);
 
+/// <summary>A code to send for a sign-in's second step: its ticket, and how (<c>email</c>, a channel's key).</summary>
+public sealed record SecondFactorSendInput(string? Ticket, string? Method);
+
+/// <summary>A code to send to someone signed in, for a step-up.</summary>
+public sealed record MySecondFactorSendInput(string? Method);
+
+/// <summary>
+/// Sending a second step's code by email, SMS or WhatsApp (ADR 0082), with the ticket the password gave: six digits, for
+/// ten minutes, to the address the site has for the person. Three a sign-in, five a person in 15 minutes.
+/// </summary>
+[Route("api/guard/second-factor")]
+[AllowAnonymous]
+public class SecondFactorCodesController(SecondFactors secondFactors) : GuardControllerBase
+{
+    [HttpPost("send")]
+    [ProducesResponseType<CodeSentDto>(200)]
+    public async Task<IActionResult> Send([FromBody] SecondFactorSendInput input, CancellationToken cancellationToken) =>
+        input.Ticket is { Length: > 0 } ticket
+            ? Answer(await secondFactors.SendForTicketAsync(ticket, input.Method, ClientIp, cancellationToken))
+            : SessionController.Error(401, "ticket_expired", "This sign-in has expired. Sign in again.");
+
+    /// <summary>The answers sending a code gives.</summary>
+    public static IActionResult Answer(SendCodeResult result) => result switch
+    {
+        { Sent: { } sent } => new OkObjectResult(sent),
+        { Error: "ticket_expired" } => SessionController.Error(401, "ticket_expired", "This sign-in has expired. Sign in again."),
+        { Error: "too_many_attempts" } => SessionController.Error(429, "too_many_attempts", "Too many codes sent. Try again in 15 minutes."),
+        { Error: "unreachable" } => SessionController.Error(400, "unreachable", "There's no address to send that code to. Try another way."),
+        { Error: "not_sent" } => SessionController.Error(502, "not_sent", "The code couldn't be sent. Try another way, or again later."),
+        _ => SessionController.Error(400, "method_not_allowed", "This site doesn't send codes that way."),
+    };
+}
+
 /// <summary>
 /// Setting up a second factor at sign-in (ADR 0082), when a group of the person's requires one and they have none yet:
 /// the ticket from the password, then the app's first code. The ticket then passes the second step with no code
@@ -89,6 +122,12 @@ public class MySecondFactorsController(SecondFactors secondFactors) : GuardContr
         await secondFactors.RemoveAsync(CurrentAccountId, id, cancellationToken);
         return NoContent();
     }
+
+    /// <summary>Sends a code by email or a channel, for a step-up (the person has no app, or not at hand).</summary>
+    [HttpPost("send")]
+    [ProducesResponseType<CodeSentDto>(200)]
+    public async Task<IActionResult> Send([FromBody] MySecondFactorSendInput input, CancellationToken cancellationToken) =>
+        SecondFactorCodesController.Answer(await secondFactors.SendForAccountAsync(CurrentAccountId, input.Method, ClientIp, cancellationToken));
 
     /// <summary>Ten new recovery codes in place of the old ones.</summary>
     [HttpPost("recovery-codes")]

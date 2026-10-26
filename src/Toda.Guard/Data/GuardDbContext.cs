@@ -35,6 +35,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
     public DbSet<SecondFactor> SecondFactors => Set<SecondFactor>();
     public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
     public DbSet<SignInTicket> SignInTickets => Set<SignInTicket>();
+    public DbSet<SentCode> SentCodes => Set<SentCode>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -218,6 +219,14 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.ToTable("security_settings");
             b.Property(x => x.StepUpMinutes).HasDefaultValue(Domain.SecuritySettings.DefaultStepUpMinutes);
             b.Property(x => x.TokenMaxDays).HasDefaultValue(Domain.SecuritySettings.DefaultTokenMaxDays);
+            System.Text.Json.JsonSerializerOptions json = new(System.Text.Json.JsonSerializerDefaults.Web);
+            b.Property(x => x.SecondFactorMethods).HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb").HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v, json),
+                v => System.Text.Json.JsonSerializer.Deserialize<List<string>>(v, json) ?? new(),
+                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<List<string>>(
+                    (a, b) => a!.SequenceEqual(b!),
+                    v => string.Join(",", v).GetHashCode(),
+                    v => v.ToList()));
         });
 
         builder.Entity<PersonalAccessToken>(b =>
@@ -259,6 +268,15 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.ToTable("recovery_codes");
             b.Property(x => x.Hash).HasMaxLength(64).IsRequired();
             b.HasIndex(x => x.AccountId);
+        });
+
+        builder.Entity<SentCode>(b =>
+        {
+            b.ToTable("sent_codes");
+            b.Property(x => x.Method).HasMaxLength(100).IsRequired();
+            b.Property(x => x.CodeHash).HasMaxLength(64).IsRequired();
+            b.HasIndex(x => new { x.AccountId, x.Method });
+            b.HasIndex(x => x.ExpiresAt);
         });
 
         builder.Entity<SignInTicket>(b =>

@@ -120,6 +120,35 @@ public class TwoFactorTests
         Assert.Equal(TwoFactorModes.Required, TwoFactorModes.Strictest(effective.Select(g => g.Group.TwoFactor))); // not auditors' strong: not a member
     }
 
+    [Theory]
+    [InlineData("email", true)]
+    [InlineData("messaging:sms", true)]
+    [InlineData("messaging:whatsapp", true)]
+    [InlineData("app", false)]
+    [InlineData("recovery", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void Codes_are_sent_by_email_or_a_channel(string? method, bool sent) => Assert.Equal(sent, SecondFactorKinds.IsSent(method));
+
+    [Fact]
+    public void Where_a_code_goes_is_shown_masked()
+    {
+        Assert.Equal("d•••@toda.example", SecondFactors.MaskEmail("dana@toda.example"));
+        Assert.Equal("•••", SecondFactors.MaskEmail("not-an-address"));
+        Assert.Equal("•••• 1234", SecondFactors.MaskNumber("+966 50 000 1234"));
+        Assert.Equal("••••", SecondFactors.MaskNumber("+12"));
+    }
+
+    [Fact]
+    public void A_sent_code_is_good_for_ten_minutes()
+    {
+        SentCode code = new(Guid.NewGuid(), Guid.NewGuid(), SecondFactorKinds.Email, SecondFactors.Hash("x"));
+
+        Assert.Equal(SentCode.Lifetime, code.ExpiresAt - code.CreatedAt);
+        Assert.Equal(TimeSpan.FromMinutes(10), SentCode.Lifetime);
+        Assert.Null(code.UsedAt);
+    }
+
     [Fact]
     public void A_ticket_is_good_for_five_minutes_and_five_tries()
     {

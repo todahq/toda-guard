@@ -380,6 +380,12 @@ public class SecuritySettings : Entity<Guid>
     /// sign-in, so an admin's later choice stays.
     /// </summary>
     public bool AdminsTwoFactorSeeded { get; set; }
+
+    /// <summary>
+    /// The sent codes a second step may use (ADR 0082): <c>email</c>, and channels' keys (<c>messaging:sms</c>). None at
+    /// first: only the authenticator app, until an admin allows more.
+    /// </summary>
+    public List<string> SecondFactorMethods { get; set; } = [];
 }
 
 /// <summary>Whether a personal access token may change things or only read.</summary>

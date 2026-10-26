@@ -30,14 +30,54 @@ public static class TwoFactorModes
     public static bool Asks(string mode) => Rank(mode) >= Rank(Required);
 }
 
-/// <summary>The kinds of second factor (ADR 0082). A recovery code isn't a factor of its own: it stands in for one, once.</summary>
+/// <summary>
+/// The kinds of second factor (ADR 0082). A recovery code isn't a factor of its own: it stands in for one, once. Codes
+/// sent by <c>email</c> or another channel (its key, <c>messaging:sms</c>) aren't set up: a site allows them, and anyone
+/// it can reach that way may use them.
+/// </summary>
 public static class SecondFactorKinds
 {
     public const string App = "app";
     public const string Recovery = "recovery";
+    public const string Email = "email";
 
     /// <summary>The methods a strong mode accepts.</summary>
     public static bool IsStrong(string kind) => kind == App;
+
+    /// <summary>A method whose code is sent: email, or a channel's key.</summary>
+    public static bool IsSent(string? method) => method is { Length: > 0 } && method is not (App or Recovery);
+}
+
+/// <summary>
+/// A code sent by email, SMS or WhatsApp for a second step (ADR 0082): its SHA-256 only, for ten minutes, good once.
+/// Sending a new one for the same method replaces it.
+/// </summary>
+public class SentCode : Entity<Guid>
+{
+    public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
+
+    protected SentCode()
+    {
+    }
+
+    public SentCode(Guid id, Guid accountId, string method, string codeHash) : base(id)
+    {
+        AccountId = accountId;
+        Method = method;
+        CodeHash = codeHash;
+        CreatedAt = DateTime.UtcNow;
+        ExpiresAt = CreatedAt + Lifetime;
+    }
+
+    public Guid AccountId { get; private set; }
+
+    /// <summary><c>email</c>, or the channel's key.</summary>
+    public string Method { get; private set; } = null!;
+
+    public string CodeHash { get; private set; } = null!;
+    public DateTime CreatedAt { get; private set; }
+    public DateTime ExpiresAt { get; private set; }
+    public DateTime? UsedAt { get; set; }
 }
 
 /// <summary>

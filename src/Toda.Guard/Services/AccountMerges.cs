@@ -451,6 +451,7 @@ public class AccountMergeService(GuardDb guardDb, PluginRuntime runtime, IServic
         await db.SecondFactors.Where(f => f.AccountId == source.Id).ExecuteDeleteAsync(ct);
         await db.RecoveryCodes.Where(c => c.AccountId == source.Id).ExecuteDeleteAsync(ct);
         await db.SignInTickets.Where(t => t.AccountId == source.Id).ExecuteDeleteAsync(ct);
+        await db.SentCodes.Where(c => c.AccountId == source.Id).ExecuteDeleteAsync(ct);
         return counts;
     }
 

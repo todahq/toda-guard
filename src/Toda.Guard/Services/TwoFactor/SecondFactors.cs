@@ -8,6 +8,7 @@ using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Toda.Platform.Acting;
 using Toda.Platform.Limits;
+using Toda.Sdk;
 using QRCoder;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
@@ -19,7 +20,21 @@ namespace Toda.Guard.Services.TwoFactor;
 /// <param name="Methods">The person's methods that the step takes (<c>app</c>); empty when <paramref name="Enrol"/>.</param>
 /// <param name="Enrol">The person has none yet and must set one up with the ticket first.</param>
 /// <param name="Strong">Only a strong method will do (the app), as one of their groups asks.</param>
-public sealed record SecondFactorChallengeDto(string Ticket, List<string> Methods, bool Enrol, bool Strong, DateTime ExpiresAt);
+/// <param name="Senders">The methods among them whose code is sent, with where it would go (masked).</param>
+public sealed record SecondFactorChallengeDto(string Ticket, List<string> Methods, bool Enrol, bool Strong, DateTime ExpiresAt, List<SecondFactorSenderDto>? Senders = null);
+
+/// <summary>A way a code can be sent to the person (ADR 0082): the method (<c>email</c>, a channel's key), its name, and where, masked.</summary>
+public sealed record SecondFactorSenderDto(string Method, string Name, string To);
+
+/// <summary>A code sent: how, where (masked), and until when it works.</summary>
+public sealed record CodeSentDto(string Method, string To, DateTime ExpiresAt);
+
+/// <summary>
+/// Sending a code: sent, or why not (<c>ticket_expired</c>; <c>method_not_allowed</c>: the site doesn't allow it, or a
+/// strong group asks for the app; <c>unreachable</c>: no address for it; <c>too_many_attempts</c>; <c>not_sent</c>: the
+/// channel failed).
+/// </summary>
+public sealed record SendCodeResult(CodeSentDto? Sent, string? Error);
 
 /// <summary>Setting up the authenticator app: the secret (to type in), the address and its QR code (a PNG data URL).</summary>
 public sealed record AppEnrolmentDto(string Secret, string Address, string Qr);
@@ -30,7 +45,8 @@ public sealed record SecondFactorEnrolledDto(List<string>? RecoveryCodes);
 public sealed record SecondFactorDto(Guid Id, string Kind, DateTime CreatedAt, DateTime? LastUsedAt);
 
 /// <summary>A person's second factors: what their groups ask (<see cref="TwoFactorModes"/>), what they have, the recovery codes left.</summary>
-public sealed record MySecondFactorsDto(string Mode, bool Asked, List<SecondFactorDto> Factors, int RecoveryCodesLeft, bool Disabled);
+public sealed record MySecondFactorsDto(string Mode, bool Asked, List<SecondFactorDto> Factors, int RecoveryCodesLeft, bool Disabled,
+    List<SecondFactorSenderDto>? Senders = null);
 
 /// <summary>A ticket's second step passed: who, for which client and scopes.</summary>
 public sealed record SecondStepPassed(Guid AccountId, string Client, string? Scopes);
@@ -55,11 +71,18 @@ public sealed class SecondFactors(
     SiteLimits limits,
     SecurityLog audit,
     IConfiguration configuration,
+    IChannels channels,
+    Toda.Platform.Channels.ChannelAddressBook addressBook,
+    Toda.Platform.Mail.EmailChannel email,
     ILogger<SecondFactors> logger) : ITransientDependency
 {
     public const int RecoveryCodeCount = 10;
     private const int MaxWrongCodes = 10;
     private static readonly TimeSpan WrongCodesWindow = TimeSpan.FromMinutes(15);
+
+    // Codes sent: five a person in 15 minutes, three a sign-in.
+    private const int MaxSends = 5;
+    private const int MaxSendsPerTicket = 3;
     private const string RecoveryAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
     private IDataProtector Protector => protection.CreateProtector("Toda.Guard.SecondFactor.v1");
@@ -95,14 +118,17 @@ public sealed class SecondFactors(
                 return null;
             }
 
+            // The app first; then the codes the site sends, by what reaches the person, unless a strong group asks for the app.
             bool strong = mode == TwoFactorModes.Strong;
-            List<string> methods = [.. kinds.Where(k => !strong || SecondFactorKinds.IsStrong(k)).Order(StringComparer.Ordinal)];
+            List<SecondFactorSenderDto> senders = strong ? [] : await SendersAsync(db, account, cancellationToken);
+            List<string> methods = [.. kinds.Where(k => !strong || SecondFactorKinds.IsStrong(k)).Order(StringComparer.Ordinal), .. senders.Select(s => s.Method)];
             string ticket = Secret();
             SignInTicket row = new(Guid.NewGuid(), accountId, Hash(ticket), client, scopes, ip);
             db.SignInTickets.Add(row);
             await db.SignInTickets.Where(t => t.ExpiresAt < DateTime.UtcNow).ExecuteDeleteAsync(cancellationToken);
+            await db.SentCodes.Where(c => c.ExpiresAt < DateTime.UtcNow).ExecuteDeleteAsync(cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
-            return new SecondFactorChallengeDto(ticket, methods, methods.Count == 0, strong, row.ExpiresAt);
+            return new SecondFactorChallengeDto(ticket, methods, methods.Count == 0, strong, row.ExpiresAt, senders);
         }, requiresNew: true, cancellationToken);
 
     /// <summary>
@@ -171,12 +197,21 @@ public sealed class SecondFactors(
     {
         (string? error, string? username) = await guardDb.RunAsync<(string?, string?)>(async db =>
         {
-            if (Disabled || !await db.SecondFactors.AnyAsync(f => f.AccountId == accountId && f.ConfirmedAt != null, cancellationToken))
+            if (Disabled)
             {
                 return (null, null);
             }
 
+            // Asked as at sign-in: someone with the app; or someone a group asks, by a code the site sends them. One with
+            // no way to give a code yet passes, or they could never step up to set the app up.
             Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == accountId, cancellationToken);
+            if (!await db.SecondFactors.AnyAsync(f => f.AccountId == accountId && f.ConfirmedAt != null, cancellationToken)
+                && (await ModeAsync(db, account, cancellationToken) is var mode && (!TwoFactorModes.Asks(mode) || mode == TwoFactorModes.Strong)
+                    || (await SendersAsync(db, account, cancellationToken)).Count == 0))
+            {
+                return (null, null);
+            }
+
             if (code is not { Length: > 0 })
             {
                 return ("second_factor_required", account.Username);
@@ -299,8 +334,133 @@ public sealed class SecondFactors(
             List<SecondFactorDto> factors = await db.SecondFactors.AsNoTracking().Where(f => f.AccountId == accountId && f.ConfirmedAt != null)
                 .OrderBy(f => f.CreatedAt).Select(f => new SecondFactorDto(f.Id, f.Kind, f.CreatedAt, f.LastUsedAt)).ToListAsync(cancellationToken);
             int left = await db.RecoveryCodes.CountAsync(c => c.AccountId == accountId && c.UsedAt == null, cancellationToken);
-            return new MySecondFactorsDto(mode, !Disabled && (TwoFactorModes.Asks(mode) || factors.Count > 0), factors, left, Disabled);
+            List<SecondFactorSenderDto> senders = Disabled || mode == TwoFactorModes.Strong ? [] : await SendersAsync(db, account, cancellationToken);
+            return new MySecondFactorsDto(mode, !Disabled && (TwoFactorModes.Asks(mode) || factors.Count > 0), factors, left, Disabled, senders);
         }, cancellationToken: cancellationToken);
+
+    /// <summary>
+    /// The ways the site may send the person a code (ADR 0082): each method it allows that reaches them, in the order it
+    /// lists them: email to the address their mail goes to, a channel to their verified address on it.
+    /// </summary>
+    private async Task<List<SecondFactorSenderDto>> SendersAsync(GuardDbContext db, Account account, CancellationToken cancellationToken)
+    {
+        List<string> allowed = (await Controllers.SecuritySettingsController.LoadAsync(db, cancellationToken)).SecondFactorMethods;
+        if (allowed.Count == 0)
+        {
+            return [];
+        }
+
+        Dictionary<string, SecondFactorSenderDto> found = [];
+        if (allowed.Contains(SecondFactorKinds.Email) && (account.MailTo ?? account.Email) is { Length: > 0 } address && await email.ReadyAsync(cancellationToken))
+        {
+            found[SecondFactorKinds.Email] = new(SecondFactorKinds.Email, "Email", MaskEmail(address));
+        }
+
+        foreach (Toda.Platform.Channels.MyChannelDto channel in await addressBook.MineAsync(account.Id, cancellationToken))
+        {
+            if (allowed.Contains(channel.Channel) && channel is { Ready: true, Verified: true, Address: { } number })
+            {
+                found[channel.Channel] = new(channel.Channel, channel.Name, MaskNumber(number));
+            }
+        }
+
+        return [.. allowed.Where(found.ContainsKey).Select(m => found[m])];
+    }
+
+    /// <summary>Sends a code for a sign-in's second step: the ticket's, for a method that reaches the person.</summary>
+    public async Task<SendCodeResult> SendForTicketAsync(string ticket, string? method, string? ip, CancellationToken cancellationToken)
+    {
+        string hash = Hash(ticket);
+        DateTime now = DateTime.UtcNow;
+        Guid? accountId = await guardDb.RunAsync(async db => await db.SignInTickets.AsNoTracking().Where(t => t.TicketHash == hash)
+            .Select(t => new { t.AccountId, t.ExpiresAt, t.Attempts }).FirstOrDefaultAsync(cancellationToken) is { } row && row.ExpiresAt > now && row.Attempts < SignInTicket.MaxAttempts
+            ? row.AccountId
+            : (Guid?)null, cancellationToken: cancellationToken);
+        return accountId is { } id
+            ? await SendAsync(id, method, $"t:{hash[..16]}", ip, cancellationToken)
+            : new SendCodeResult(null, "ticket_expired");
+    }
+
+    /// <summary>Sends a code to someone signed in, for a step-up.</summary>
+    public Task<SendCodeResult> SendForAccountAsync(Guid accountId, string? method, string? ip, CancellationToken cancellationToken) =>
+        SendAsync(accountId, method, null, ip, cancellationToken);
+
+    /// <summary>
+    /// A new code for the method (six digits, ten minutes, kept as its hash), in place of one sent before, sent as a
+    /// secret: the mail log keeps no text of it. Five a person in 15 minutes, three a sign-in.
+    /// </summary>
+    private async Task<SendCodeResult> SendAsync(Guid accountId, string? method, string? ticketKey, string? ip, CancellationToken cancellationToken)
+    {
+        if (Disabled || !SecondFactorKinds.IsSent(method))
+        {
+            return new SendCodeResult(null, "method_not_allowed");
+        }
+
+        (SecondFactorSenderDto? sender, string? error, string? username, string? code) = await guardDb.RunAsync<(SecondFactorSenderDto?, string?, string?, string?)>(async db =>
+        {
+            Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == accountId, cancellationToken);
+            if (!(await Controllers.SecuritySettingsController.LoadAsync(db, cancellationToken)).SecondFactorMethods.Contains(method!)
+                || await ModeAsync(db, account, cancellationToken) == TwoFactorModes.Strong)
+            {
+                return (null, "method_not_allowed", account.Username, null);
+            }
+
+            if (await SendersAsync(db, account, cancellationToken) is not { } senders || senders.FirstOrDefault(s => s.Method == method) is not { } found)
+            {
+                return (null, "unreachable", account.Username, null);
+            }
+
+            if (await limits.CountAsync(SendKey(accountId), WrongCodesWindow, cancellationToken) >= MaxSends
+                || (ticketKey is not null && await limits.CountAsync($"second-factor-send|{ticketKey}", SignInTicket.Lifetime, cancellationToken) >= MaxSendsPerTicket))
+            {
+                return (null, "too_many_attempts", account.Username, null);
+            }
+
+            string fresh = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", System.Globalization.CultureInfo.InvariantCulture);
+            await db.SentCodes.Where(c => c.AccountId == accountId && c.Method == method).ExecuteDeleteAsync(cancellationToken);
+            db.SentCodes.Add(new SentCode(Guid.NewGuid(), accountId, method!, CodeHash(accountId, method!, fresh)));
+            await db.SaveChangesAsync(cancellationToken);
+            return (found, null, account.Username, fresh);
+        }, requiresNew: true, cancellationToken);
+
+        if (sender is null || code is null)
+        {
+            return new SendCodeResult(null, error);
+        }
+
+        await limits.AddAsync(SendKey(accountId), cancellationToken);
+        if (ticketKey is not null)
+        {
+            await limits.AddAsync($"second-factor-send|{ticketKey}", cancellationToken);
+        }
+
+        ChannelSendResult result = await channels.SendAsync(new ChannelMessage(
+            sender.Method == SecondFactorKinds.Email ? SecondFactorMail.Code : SecondFactorMail.CodeMessage,
+            [ChannelRecipient.Person(accountId)],
+            new Dictionary<string, object?> { ["code"] = code, ["minutes"] = (int)SentCode.Lifetime.TotalMinutes, ["site"] = Issuer },
+            Source: "second-factor",
+            Channel: sender.Method == SecondFactorKinds.Email ? null : sender.Method,
+            Retry: false) { Secret = true }, cancellationToken);
+        await audit.WriteAsync(SecurityAuditTypes.SecondFactorCodeSent, username, accountId, result.Sent > 0 ? sender.Method : $"{sender.Method}: not sent", ip, cancellationToken);
+        return result.Sent > 0
+            ? new SendCodeResult(new CodeSentDto(sender.Method, sender.To, DateTime.UtcNow + SentCode.Lifetime), null)
+            : new SendCodeResult(null, result.Unreachable > 0 ? "unreachable" : "not_sent");
+    }
+
+    private static string SendKey(Guid accountId) => $"second-factor-send|u:{accountId:N}";
+
+    private static string CodeHash(Guid accountId, string method, string code) => Hash($"{accountId:N}|{method}|{code}");
+
+    /// <summary>An address shown so the person knows it, not so others learn it: <c>d•••@toda.example</c>.</summary>
+    public static string MaskEmail(string address) =>
+        address.IndexOf('@') is var at and > 0 ? $"{address[0]}•••{address[at..]}" : "•••";
+
+    /// <summary>A number's last four digits: <c>•••• 1234</c>.</summary>
+    public static string MaskNumber(string number)
+    {
+        string digits = new([.. number.Where(char.IsAsciiDigit)]);
+        return digits.Length <= 4 ? "••••" : $"•••• {digits[^4..]}";
+    }
 
     /// <summary>Removes one of the person's second factors; not the last one while a group of theirs requires one.</summary>
     public Task RemoveAsync(Guid accountId, Guid factorId, CancellationToken cancellationToken) =>
@@ -366,6 +526,28 @@ public sealed class SecondFactors(
             }
 
             recovery.UsedAt = now;
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
+        // A code sent by email or a channel: the last one for the method, unused, within its ten minutes, while the site
+        // still allows the method and no strong group asks for the app.
+        if (SecondFactorKinds.IsSent(method))
+        {
+            if (strong || !(await Controllers.SecuritySettingsController.LoadAsync(db, cancellationToken)).SecondFactorMethods.Contains(method!))
+            {
+                return false;
+            }
+
+            string hash = CodeHash(accountId, method!, new string([.. (code ?? "").Where(char.IsAsciiDigit)]));
+            SentCode? sent = await db.SentCodes.FirstOrDefaultAsync(c => c.AccountId == accountId && c.Method == method && c.UsedAt == null && c.ExpiresAt > now
+                && c.CodeHash == hash, cancellationToken);
+            if (sent is null)
+            {
+                return false;
+            }
+
+            sent.UsedAt = now;
             await db.SaveChangesAsync(cancellationToken);
             return true;
         }

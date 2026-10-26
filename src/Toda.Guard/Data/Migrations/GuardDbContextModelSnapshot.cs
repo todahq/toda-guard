@@ -677,6 +677,12 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<int>("RetentionDays")
                         .HasColumnType("integer");
 
+                    b.Property<string>("SecondFactorMethods")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
                     b.Property<int>("StepUpMinutes")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -690,6 +696,42 @@ namespace Toda.Guard.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("security_settings", "guard");
+                });
+
+            modelBuilder.Entity("Toda.Guard.Domain.SentCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("AccountId", "Method");
+
+                    b.ToTable("sent_codes", "guard");
                 });
 
             modelBuilder.Entity("Toda.Guard.Domain.SessionHandoff", b =>

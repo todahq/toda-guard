@@ -112,3 +112,62 @@ public class GuardStepUpPolicy(GuardDb guardDb) : IStepUpPolicy, ITransientDepen
         return TimeSpan.FromMinutes(Math.Clamp(minutes, SecuritySettings.MinStepUpMinutes, SecuritySettings.MaxStepUpMinutes));
     }
 }
+
+/// <summary>A way the site can send a second step's code (ADR 0082): email, or a channel that reaches people one by one; Ready when it's set up.</summary>
+public sealed record SecondFactorMethodOptionDto(string Method, string Name, bool Ready);
+
+/// <summary>The sent codes a second step may use (none: only the authenticator app), and every way the site has.</summary>
+public sealed record SecondFactorSettingsDto(List<string> Methods, List<SecondFactorMethodOptionDto> Available);
+
+public sealed record SecondFactorSettingsInput(List<string>? Methods);
+
+/// <summary>
+/// Which codes a second step may be sent by (ADR 0082): by email, SMS, WhatsApp or another channel, besides the
+/// authenticator app. A group set to strong still asks for the app. Changing it needs a step-up and is audited.
+/// </summary>
+[Route("api/guard/security/second-factor")]
+[Authorize(Policy = TodaPolicies.Admin)]
+public class SecondFactorSettingsController(GuardDb guardDb, SecurityLog audit, Toda.Platform.Channels.ChannelTargetService channelTargets,
+    Toda.Platform.Mail.EmailChannel email) : GuardControllerBase
+{
+    [HttpGet]
+    public async Task<SecondFactorSettingsDto> Get(CancellationToken cancellationToken)
+    {
+        List<SecondFactorMethodOptionDto> available = await AvailableAsync(cancellationToken);
+        return await guardDb.RunAsync(async db => new SecondFactorSettingsDto((await SecuritySettingsController.LoadAsync(db, cancellationToken)).SecondFactorMethods, available),
+            cancellationToken: cancellationToken);
+    }
+
+    [HttpPut]
+    [StepUp]
+    public async Task<SecondFactorSettingsDto> Save([FromBody] SecondFactorSettingsInput input, CancellationToken cancellationToken)
+    {
+        List<SecondFactorMethodOptionDto> available = await AvailableAsync(cancellationToken);
+        List<string> methods = [.. (input.Methods ?? []).Distinct(StringComparer.Ordinal)];
+        if (methods.FirstOrDefault(m => available.TrueForAll(a => a.Method != m)) is { } unknown)
+        {
+            throw new UserFriendlyException($"'{unknown}' isn't a way this site can send a code.");
+        }
+
+        return await guardDb.RunAsync(async db =>
+        {
+            SecuritySettings settings = await SecuritySettingsController.LoadAsync(db, cancellationToken);
+            if (!settings.SecondFactorMethods.SequenceEqual(methods))
+            {
+                audit.Add(db, SecurityAuditTypes.SecondFactorMethods, null, new { methods = new { before = settings.SecondFactorMethods, after = methods } });
+                settings.SecondFactorMethods = methods;
+                await db.SaveChangesAsync(cancellationToken);
+            }
+
+            return new SecondFactorSettingsDto(settings.SecondFactorMethods, available);
+        }, requiresNew: true, cancellationToken);
+    }
+
+    /// <summary>Email, then each channel that reaches people one by one and carries messages (SMS, WhatsApp, Slack, the phone app).</summary>
+    private async Task<List<SecondFactorMethodOptionDto>> AvailableAsync(CancellationToken cancellationToken) =>
+    [
+        new(SecondFactorKinds.Email, "Email", await email.ReadyAsync(cancellationToken)),
+        .. (await channelTargets.ChannelsAsync(cancellationToken)).Where(c => c.Personal && c.Kinds.Contains(Toda.Sdk.TemplateKinds.Message))
+            .Select(c => new SecondFactorMethodOptionDto(c.Key, c.Name ?? c.Key, c.Ready)),
+    ];
+}
