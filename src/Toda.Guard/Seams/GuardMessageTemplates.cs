@@ -17,6 +17,12 @@ public static class GuardMessageKinds
 
     /// <summary>A second step's code in a line, by SMS, WhatsApp or another channel.</summary>
     public const string SecondFactorCodeMessage = SecondFactorCode + ".message";
+
+    /// <summary>
+    /// Whether the kind carries a link or a code that works for someone (all of Guard's do): then it's sent as a secret,
+    /// so the mail log keeps neither its text nor its subject, and an admin reading it can't use a reset or a code.
+    /// </summary>
+    public static bool CarriesSecret(string kind) => kind is SignUpVerify or PasswordReset or AddressVerify or SecondFactorCode or SecondFactorCodeMessage;
 }
 
 /// <summary>A template's subject (an email's; null for a message) and body, in Markdown with <c>{{ name }}</c> values.</summary>

@@ -8,8 +8,9 @@ public sealed record GuardChannel(string Method, string Name, string Address);
 
 /// <summary>
 /// A message Guard sends (ADR 0087): one of its kinds (<see cref="GuardMessageKinds"/>) to an account (by its id) or an
-/// address, with the values its template uses. A secret one (a second step's code) is delivered once as rendered and
-/// kept nowhere in the clear; it's never retried. <paramref name="Channel"/> is null for email.
+/// address, with the values its template uses. <paramref name="Channel"/> is null for email. A secret one is delivered
+/// once as rendered, its text and subject kept nowhere, and never retried; every kind that carries a link or a code
+/// (<see cref="GuardMessageKinds.CarriesSecret"/>) is one, whatever the sender says, so no host can forget it.
 /// </summary>
 public sealed record GuardMessage(
     string Kind,
@@ -20,7 +21,10 @@ public sealed record GuardMessage(
     string? Language,
     string Source,
     string? Channel = null,
-    bool Secret = false);
+    bool Secret = false)
+{
+    public bool Secret { get; init; } = Secret || GuardMessageKinds.CarriesSecret(Kind);
+}
 
 /// <summary>How a message went: how many were sent, and how many recipients nothing reached.</summary>
 public sealed record GuardSendResult(int Sent, int Unreachable);
