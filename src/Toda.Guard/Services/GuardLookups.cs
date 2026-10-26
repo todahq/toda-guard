@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Directories;
 using Toda.Guard.Domain;
-using Toda.Platform.Plugins;
 using Toda.Sdk;
 using Volo.Abp.DependencyInjection;
 
@@ -148,31 +147,4 @@ public class MembershipResolver(GuardDb guardDb, MembershipGraph graph) : IMembe
 
             return members.ToList();
         }, cancellationToken: cancellationToken);
-}
-
-/// <summary>Built per plugin: only hands out directories of the connector types that plugin registered.</summary>
-public class PluginDirectoryConnectionProvider(IServiceProvider hostScope, string pluginKey) : IDirectoryConnectionProvider
-{
-    public async Task<IReadOnlyList<DirectoryConnectionContext>> GetConnectionsAsync(CancellationToken cancellationToken = default)
-    {
-        PluginRuntime runtime = (PluginRuntime)hostScope.GetService(typeof(PluginRuntime))!;
-        ConnectorCatalog catalog = (ConnectorCatalog)hostScope.GetService(typeof(ConnectorCatalog))!;
-        GuardDb guardDb = (GuardDb)hostScope.GetService(typeof(GuardDb))!;
-
-        HashSet<string> types;
-        await using (ExtensionLease<IDirectoryConnector> lease = runtime.LeaseExtensions<IDirectoryConnector>(hostScope))
-        {
-            types = lease.Items.Where(i => i.PluginKey == pluginKey).Select(i => i.Instance.Type).ToHashSet();
-        }
-
-        if (types.Count == 0)
-        {
-            return [];
-        }
-
-        return await guardDb.RunAsync<IReadOnlyList<DirectoryConnectionContext>>(async db =>
-            (await db.Directories.AsNoTracking().Where(d => types.Contains(d.Type)).OrderBy(d => d.Order).ToListAsync(cancellationToken))
-                .Select(catalog.BuildContext)
-                .ToList(), cancellationToken: cancellationToken);
-    }
 }

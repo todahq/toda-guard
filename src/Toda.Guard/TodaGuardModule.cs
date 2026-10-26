@@ -48,8 +48,6 @@ public class TodaGuardModule : AbpModule
         Configure<AbpDbContextOptions>(options =>
             options.Configure<GuardDbContext>(c => c.UseNpgsql(npgsql =>
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", GuardDbContext.Schema))));
-        // The events Guard publishes for other modules and plugins (ADR 0047), sent from its outbox.
-        Configure<EventCatalogOptions>(options => options.AddAssembly(typeof(AccountCreatedEto).Assembly, GuardDbContext.Schema));
         Configure<AbpDistributedEventBusOptions>(options => options.Outboxes.Configure(GuardDbContext.Schema, outbox =>
         {
             outbox.UseDbContext<GuardDbContext>();
@@ -145,30 +143,10 @@ public class TodaGuardModule : AbpModule
 
         context.Services.AddHostedService<DirectorySyncScheduler>();
         context.Services.AddHostedService<SecurityAuditRetention>();
-
-        Configure<TodaPlatformOptions>(options => options.ModuleVersions["toda-guard"] = Version);
-
-        // What guard offers to plugins. Connector plugins only ever see their own directory types.
-        Configure<PluginHostServiceOptions>(options =>
-        {
-            options.Expose<IAccountLookup>();
-            options.Expose<IGroupLookup>();
-            options.Expose<IMembershipResolver>();
-            options.Expose<IAccountProvisioning>();
-            options.Expose<IDirectoryConnectionProvider>((hostScope, plugin) => new PluginDirectoryConnectionProvider(hostScope, plugin.Key));
-        });
     }
 
     public override void OnApplicationInitialization(Volo.Abp.ApplicationInitializationContext context)
     {
-        // The mails self-service sends (ADR 0037), as templates admins can reword (ADR 0039).
-        Toda.Platform.Templates.TemplateCatalog templates = context.ServiceProvider.GetRequiredService<Toda.Platform.Templates.TemplateCatalog>();
-        templates.Register(SelfServiceMail.VerifyDefinition);
-        templates.Register(SelfServiceMail.ResetDefinition);
-        templates.Register(AddressMail.VerifyDefinition);
-        templates.Register(Services.TwoFactor.SecondFactorMail.CodeDefinition); // a second step's code (ADR 0082)
-        templates.Register(Services.TwoFactor.SecondFactorMail.CodeMessageDefinition);
-
         // A test site shows accounts' passwords on its sign-in page: said once at start, so a site people use doesn't by mistake.
         if (context.ServiceProvider.GetRequiredService<TestAccounts>().List() is { Count: > 0 } shown)
         {
