@@ -141,6 +141,31 @@ public sealed record PluginPersonalData(
     IReadOnlyList<string> Problems);
 
 /// <summary>
+/// A plugin a site has (ADR 0082, step 2b), enabled, disabled, or uninstalled while what it kept may remain, with its
+/// declaration; its stores' names and purposes are in the site's languages.
+/// </summary>
+public sealed record InstalledPlugin(string Key, LocalizedText Name, string Version, string State, DateTime? RemovedAt, PluginPersonalData PersonalData)
+{
+    public static class States
+    {
+        public const string Enabled = "enabled";
+        public const string Disabled = "disabled";
+
+        /// <summary>Uninstalled, but its schema is still there or it declared stores: what it kept may remain.</summary>
+        public const string Removed = "removed";
+    }
+}
+
+/// <summary>
+/// The plugins a host has, for the data map (ADR 0082, step 2b). Guard's default has none, so Guard on its own maps its
+/// host's modules only; Toda's reads every plugin a site has installed, even disabled or removed.
+/// </summary>
+public interface IPluginPersonalDataSource
+{
+    Task<IReadOnlyList<InstalledPlugin>> ListAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
 /// A plugin's personal data as its manifest declares it: the contribution <c>guard.personal-data@1</c>, an array of
 /// entries. An entry is a store (<c>key</c>, <c>name</c>, <c>purpose</c>, <c>tables</c>, <c>files</c>, <c>about</c>,
 /// <c>kinds</c>, <c>kept</c>, <c>goesTo</c>, <c>fields</c>) or tables that hold nothing about people (<c>none</c>:
