@@ -135,7 +135,7 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
 }
 
 /// <summary>Runs each directory's sync on its interval.</summary>
-public class DirectorySyncScheduler(IServiceScopeFactory scopes, ClusterLocks locks, ILogger<DirectorySyncScheduler> logger) : BackgroundService
+public class DirectorySyncScheduler(IServiceScopeFactory scopes, IGuardLocks locks, ILogger<DirectorySyncScheduler> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

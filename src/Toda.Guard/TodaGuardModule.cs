@@ -51,6 +51,8 @@ public class TodaGuardModule : AbpModule
         context.Services.AddAbpDbContext<GuardDbContext>();
         // Where Guard's events go (ADR 0087): ABP's distributed bus and Guard's outbox, unless the host says otherwise.
         context.Services.TryAddTransient<IGuardEventSink, DistributedGuardEventSink>();
+        // Locks every server shares (ADR 0087): Postgres advisory locks on Guard's database, unless the host gives its own.
+        context.Services.TryAddSingleton<IGuardLocks, PostgresGuardLocks>();
         Configure<AbpDbContextOptions>(options =>
             options.Configure<GuardDbContext>(c => c.UseNpgsql(npgsql =>
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", GuardDbContext.Schema))));
