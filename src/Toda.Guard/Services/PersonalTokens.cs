@@ -36,7 +36,7 @@ public sealed record CreatePersonalTokenInput(string Name, string Access, List<G
 /// Personal access tokens (M7): made, listed, revoked, and found by their secret. A token is <c>toda_pat_</c> and 43
 /// random characters; only its SHA-256 is kept.
 /// </summary>
-public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGrantScopeDescriber> describers, Toda.Platform.Tools.ToolCatalog tools)
+public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGrantScopeDescriber> describers, ITokenRestrictions restrictions)
     : ITransientDependency
 {
     public const string SecretPrefix = "toda_pat_";
@@ -70,15 +70,15 @@ public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGra
         List<string>? limitedTo = input.Tools is { Count: > 0 } named ? named.Distinct(StringComparer.Ordinal).ToList() : null;
         if (limitedTo is not null)
         {
-            Dictionary<string, Toda.Platform.Tools.ToolInfo> catalog = (await tools.ListAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+            Dictionary<string, GuardTool> catalog = (await restrictions.ToolsAsync(cancellationToken)).ToDictionary(t => t.Name, StringComparer.Ordinal);
             foreach (string tool in limitedTo)
             {
-                if (!catalog.TryGetValue(tool, out Toda.Platform.Tools.ToolInfo? info))
+                if (!catalog.TryGetValue(tool, out GuardTool? info))
                 {
                     throw new UserFriendlyException($"There's no tool {tool}.");
                 }
 
-                if (input.Access == TokenAccess.Read && !info.Hints.ReadOnly)
+                if (input.Access == TokenAccess.Read && !info.ReadOnly)
                 {
                     throw new UserFriendlyException($"{tool} changes things, and this token may only read.");
                 }

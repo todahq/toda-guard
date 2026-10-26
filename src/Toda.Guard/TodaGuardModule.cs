@@ -58,6 +58,9 @@ public class TodaGuardModule : AbpModule
         // Guard's settings (ADR 0087), and the site's defaults from them unless the host has its own.
         context.Services.Configure<GuardOptions>(configuration.GetSection(GuardOptions.Section));
         context.Services.TryAddTransient<IGuardSiteDefaults, OptionsGuardSiteDefaults>();
+        // No tools for tokens to be limited to, and no challenge on sign-up, unless the host has them.
+        context.Services.TryAddTransient<ITokenRestrictions, NoTokenRestrictions>();
+        context.Services.TryAddTransient<ISignUpChallenges, NoSignUpChallenges>();
         Configure<AbpDbContextOptions>(options =>
             options.Configure<GuardDbContext>(c => c.UseNpgsql(npgsql =>
                 npgsql.MigrationsHistoryTable("__EFMigrationsHistory", GuardDbContext.Schema))));

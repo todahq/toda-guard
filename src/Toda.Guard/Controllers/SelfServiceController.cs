@@ -14,21 +14,13 @@ namespace Toda.Guard.Controllers;
 /// on its own: [AllowAnonymous] on a controller would override any admin policy on its actions.
 /// </summary>
 [Route("api/guard")]
-public class SelfServiceController(SelfService self, SelfServiceLimiter limiter, Toda.Platform.Security.Captchas captchas, TestAccounts testAccounts)
+public class SelfServiceController(SelfService self, SelfServiceLimiter limiter, ISignUpChallenges challenges, TestAccounts testAccounts)
     : GuardControllerBase
 {
     /// <summary>The accounts a test site shows on its sign-in page, with their passwords; none on any other site.</summary>
     [AllowAnonymous]
     [HttpGet("signin/test-accounts")]
     public IReadOnlyList<TestAccountDto> TestAccounts() => testAccounts.List();
-
-    /// <summary>
-    /// A CAPTCHA for a sign-up (M10 step 7): a plugin's, or Toda's own proof of work, fresh each time it's asked for, as an
-    /// answer counts once. Null when the site has none.
-    /// </summary>
-    [AllowAnonymous]
-    [HttpGet("signup/captcha")]
-    public Task<Toda.Sdk.CaptchaChallenge?> Captcha(CancellationToken cancellationToken) => captchas.ChallengeAsync(cancellationToken);
 
     /// <summary>Whether people may sign up here, and with which email domains (all when empty).</summary>
     [AllowAnonymous]
@@ -41,7 +33,7 @@ public class SelfServiceController(SelfService self, SelfServiceLimiter limiter,
     public async Task<NoContentResult> SignUp([FromBody] SignUpInput input, CancellationToken cancellationToken)
     {
         await LimitAsync("signup", input.Email, cancellationToken);
-        if (!await captchas.VerifyAsync(input.Captcha, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken))
+        if (!await challenges.VerifyAsync(input.Captcha, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken))
         {
             throw new UserFriendlyException("Answer the question that shows you're a person.");
         }
