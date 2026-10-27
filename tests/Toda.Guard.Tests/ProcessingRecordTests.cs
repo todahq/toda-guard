@@ -62,6 +62,19 @@ public class ProcessingRecordTests
         Assert.Contains("**Stores with no legal basis yet**: \n- Name of crm.contacts (`crm.contacts`)", md);
         Assert.Contains("**Plugins that don't say what they keep about people**: \n- AGENDA (`agenda`)", md);
         Assert.Contains("- NOTES (`notes`): guard.personal-data@1 is a list of entries.", md);
+        Assert.DoesNotContain("The site's country isn't recorded", md);
+    }
+
+    [Fact]
+    public void A_site_without_its_country_has_that_gap_first()
+    {
+        PrivacyMapDto map = Map();
+        map = map with { Settings = map.Settings with { Country = " " } };
+
+        string md = ProcessingRecord.ToMarkdown(map, ProcessingRecordTexts.English, "en", DateTime.UtcNow);
+        Assert.Contains("## The site's country\n\nnot recorded yet\n", md);
+        Assert.Contains("## Gaps\n\n**The site's country isn't recorded, so what leaves it can't be said**\n\n**Stores with no legal basis yet**", md);
+        Assert.Contains("لم يُسجَّل بلد الموقع", ProcessingRecord.ToMarkdown(map, ProcessingRecordTexts.Arabic, "ar", DateTime.UtcNow));
     }
 
     [Fact]

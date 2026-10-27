@@ -47,6 +47,7 @@ public sealed record ProcessingRecordTexts
     public required string Undecided { get; init; }
     public required string Removed { get; init; }
     public required string Gaps { get; init; }
+    public required string NoCountry { get; init; }
     public required string NoLegalBasis { get; init; }
     public required string DoesntSay { get; init; }
     public required string HasProblems { get; init; }
@@ -91,6 +92,7 @@ public sealed record ProcessingRecordTexts
         Undecided = "not decided",
         Removed = "uninstalled; what it kept may remain",
         Gaps = "Gaps",
+        NoCountry = "The site's country isn't recorded, so what leaves it can't be said",
         NoLegalBasis = "Stores with no legal basis yet",
         DoesntSay = "Plugins that don't say what they keep about people",
         HasProblems = "Plugins whose declaration has problems",
@@ -152,6 +154,7 @@ public sealed record ProcessingRecordTexts
         Undecided = "لم يُحدَّد",
         Removed = "أُزيلت؛ قد يبقى ما حفظته",
         Gaps = "النواقص",
+        NoCountry = "لم يُسجَّل بلد الموقع، فلا يمكن القول ما الذي يغادره",
         NoLegalBasis = "مخازن بلا أساس نظامي بعد",
         DoesntSay = "إضافات لا تذكر ما تحفظه عن الأشخاص",
         HasProblems = "إضافات في إعلانها مشكلات",
@@ -219,6 +222,12 @@ public static class ProcessingRecord
         }
 
         md.Append("\n## ").Append(t.Gaps).Append("\n\n");
+        // Every "outside the site's country" rests on it, so a site that hasn't said its country has that gap first.
+        if (Line(map.Settings.Country) is null)
+        {
+            md.Append("**").Append(t.NoCountry).Append("**\n\n");
+        }
+
         List<string> unrecorded = [.. map.Stores.Where(s => s.Recorded?.LegalBasis is null).Select(s => $"{Line(Text(s.Name, language))} (`{s.Key}`)")];
         List<string> silent = [.. map.Plugins.Where(p => p.PersonalData.State == PersonalDataDeclaration.States.DoesntSay).Select(p => $"{Line(Text(p.Name, language))} (`{p.Key}`)")];
         List<string> broken = [.. map.Plugins.Where(p => p.PersonalData.State == PersonalDataDeclaration.States.Problems)
