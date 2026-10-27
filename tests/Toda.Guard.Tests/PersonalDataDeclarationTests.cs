@@ -96,6 +96,29 @@ public class PersonalDataDeclarationTests
     }
 
     [Fact]
+    public void A_plugin_names_the_services_outside_the_site_it_sends_data_to()
+    {
+        PluginPersonalData read = Read("""
+            [{ "key": "payments", "name": "Payments", "purpose": "Who paid", "tables": ["payments"], "about": "both", "kinds": ["contact"],
+               "kept": "forever", "goesTo": ["mail", "service:stripe", "service:acme-enrich"] }]
+            """, "payments");
+
+        Assert.Empty(read.Problems);
+        Assert.Equal(["mail", "service:stripe", "service:acme-enrich"], Assert.Single(read.Stores).GoesTo);
+    }
+
+    [Theory]
+    [InlineData("service:stripe", true)]
+    [InlineData("service:acme-enrich", true)]
+    [InlineData("service:", false)]
+    [InlineData("service:Stripe", false)]
+    [InlineData("service:a b", false)]
+    [InlineData("stripe", false)]
+    [InlineData("mail", true)]
+    public void A_destination_is_the_sites_or_a_named_service(string destination, bool known) =>
+        Assert.Equal(known, PersonalDataDestinations.IsKnown(destination));
+
+    [Fact]
     public void A_host_may_know_other_destinations()
     {
         string json = """

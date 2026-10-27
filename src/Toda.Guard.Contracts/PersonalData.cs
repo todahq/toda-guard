@@ -41,7 +41,7 @@ public static class PersonalDataSubjects
 }
 
 /// <summary>Where a store's data can leave the site. Open: a host may add its own (the marketplace has no LDAP or git hosts).</summary>
-public static class PersonalDataDestinations
+public static partial class PersonalDataDestinations
 {
     public const string Mail = "mail";
     public const string Sms = "sms";
@@ -57,6 +57,24 @@ public static class PersonalDataDestinations
     public const string Directory = "directory";
 
     public static readonly IReadOnlyList<string> All = [Mail, Sms, WhatsApp, Chat, Push, Webhooks, Ai, OutsideMcp, GitHosts, Storage, Backups, Directory];
+
+    /// <summary>
+    /// A service outside the site a plugin sends data to, named: <c>service:stripe</c>, <c>service:acme-enrich</c> (its
+    /// vendor's API, a payment provider). The site records its recipient and country as for any destination.
+    /// </summary>
+    public const string ServicePrefix = "service:";
+
+    public static bool IsService(string destination) =>
+        destination.StartsWith(ServicePrefix, StringComparison.Ordinal) && ServiceName().IsMatch(destination[ServicePrefix.Length..]);
+
+    /// <summary>One of the destinations given (the host's, Toda's when none), or a named service.</summary>
+    public static bool IsKnown(string destination, IReadOnlyCollection<string>? destinations = null) =>
+        (destinations ?? All).Contains(destination) || IsService(destination);
+
+    private const int TimeoutMilliseconds = 1000;
+
+    [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.None, TimeoutMilliseconds)]
+    private static partial Regex ServiceName();
 }
 
 /// <summary>
@@ -163,6 +181,64 @@ public sealed record InstalledPlugin(string Key, LocalizedText Name, string Vers
 public interface IPluginPersonalDataSource
 {
     Task<IReadOnlyList<InstalledPlugin>> ListAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Whose data an export is (ADR 0082, step 3): a person with an account, by its id, with the account's own addresses so
+/// what was sent to them is found too; or someone outside Toda known only by an address (a requester, a mail sender, a
+/// customer).
+/// </summary>
+public sealed record PersonalDataSubject(Guid? AccountId, IReadOnlyList<string> Emails, IReadOnlyList<string> Phones)
+{
+    public static PersonalDataSubject Outside(string? email, string? phone) =>
+        new(null, string.IsNullOrWhiteSpace(email) ? [] : [email.Trim()], string.IsNullOrWhiteSpace(phone) ? [] : [phone.Trim()]);
+}
+
+/// <summary>
+/// Who asked for an export, which decides what goes in from records the person can no longer read: their own export
+/// holds what they wrote on what they can still read; an admin's holds all of it, each item on what they can't read
+/// marked, for the controller to redact if it must before handing it over.
+/// </summary>
+public static class PersonalDataRequesters
+{
+    public const string Person = "person";
+    public const string Admin = "admin";
+}
+
+/// <summary>
+/// What an exporter writes to (ADR 0082, step 3). Rows are JSON objects, Guard's own types, so nothing of a plugin's
+/// stays referenced once its export is done, and a big store streams without being held: each name is a file
+/// <c>{store}/{name}.json</c>. Files go under <c>files/{store}/</c>. A store is named as its module or plugin declares
+/// it; a plugin gives its short key (<c>pages</c>), and Guard qualifies it.
+/// </summary>
+public interface IPersonalDataExport
+{
+    PersonalDataSubject Subject { get; }
+
+    /// <summary>One of <see cref="PersonalDataRequesters"/>.</summary>
+    string RequestedBy { get; }
+
+    /// <summary>The language labels are written in: <c>en</c>, <c>ar</c>, a site's other languages.</summary>
+    string Language { get; }
+
+    /// <summary>Whether files go in; without, a file's row says it was left out.</summary>
+    bool Files { get; }
+
+    Task WriteAsync(string store, string name, IAsyncEnumerable<System.Text.Json.Nodes.JsonObject> rows, CancellationToken cancellationToken = default);
+
+    Task WriteFileAsync(string store, string name, Stream content, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Exports what some stores hold about one person (ADR 0082, step 3): what's about them or by them, nothing of anyone
+/// else's. Toda's modules register theirs; a plugin adds one with <c>AddExtension</c>, naming its stores by their short
+/// keys as in its manifest. A store it names that its module or plugin doesn't declare is reported, not trusted.
+/// </summary>
+public interface IPersonalDataExporter
+{
+    IReadOnlyList<string> Stores { get; }
+
+    Task ExportAsync(IPersonalDataExport export, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -298,9 +374,9 @@ public static partial class PersonalDataDeclaration
             }
 
             List<string> goesTo = Strings(item, "goesTo", at, problems);
-            foreach (string destination in goesTo.Where(d => !destinations.Contains(d)))
+            foreach (string destination in goesTo.Where(d => !PersonalDataDestinations.IsKnown(d, destinations)))
             {
-                problems.Add($"{at}: '{destination}' isn't a destination this site knows ({string.Join(", ", destinations)}).");
+                problems.Add($"{at}: '{destination}' isn't a destination this site knows ({string.Join(", ", destinations)}, or service:{{name}}).");
             }
 
             List<string> files = Files(item, plugin, at, problems);
@@ -340,7 +416,7 @@ public static partial class PersonalDataDeclaration
                   "about": { "enum": ["accounts", "outside", "both"] },
                   "kinds": { "type": "array", "minItems": 1, "items": { "type": "string" } },
                   "kept": { "type": "string", "pattern": "^(until-done|with-account|forever|days:[1-9][0-9]*|setting:[^=]+=[0-9]+)$" },
-                  "goesTo": { "type": "array", "items": { "type": "string" } },
+                  "goesTo": { "type": "array", "items": { "type": "string", "pattern": "^([a-z]+(-[a-z]+)*|service:[a-z0-9]+(-[a-z0-9]+)*)$" } },
                   "fields": { "type": "array", "items": { "type": "object", "required": ["on", "key"],
                     "properties": { "on": { "enum": ["record", "asset"] }, "key": { "type": "string" } } } }
                 }
