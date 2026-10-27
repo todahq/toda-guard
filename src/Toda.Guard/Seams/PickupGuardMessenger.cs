@@ -23,6 +23,9 @@ public sealed partial class PickupGuardMessenger(IOptions<GuardOptions> options,
             ? [new GuardChannel("email", "Email", address)]
             : []);
 
+    public Task<IReadOnlyList<GuardMethod>> MethodsAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<GuardMethod>>([new GuardMethod("email", "Email", Folder is not null)]);
+
     public async Task<GuardSendResult> SendAsync(GuardMessage message, CancellationToken cancellationToken)
     {
         string? to = message.Address;

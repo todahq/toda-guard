@@ -6,6 +6,9 @@ namespace Toda.Guard;
 /// </summary>
 public sealed record GuardChannel(string Method, string Name, string Address);
 
+/// <summary>A way the site can send people a code: <c>email</c> or a channel, its name, and whether it's set up to send now.</summary>
+public sealed record GuardMethod(string Method, string Name, bool Ready);
+
 /// <summary>
 /// A message Guard sends (ADR 0087): one of its kinds (<see cref="GuardMessageKinds"/>) to an account (by its id) or an
 /// address, with the values its template uses. <paramref name="Channel"/> is null for email. A secret one is delivered
@@ -41,6 +44,12 @@ public interface IGuardMessenger
     /// and each channel where they have a verified address. Guard applies the site's allowed methods itself.
     /// </summary>
     Task<IReadOnlyList<GuardChannel>> ReachAsync(Guid accountId, string? emailAddress, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The ways the site has of sending a person a code, email first, then each channel that reaches people one by one
+    /// and carries a short message: what an admin may allow for a second step (SecuritySettings.SecondFactorMethods).
+    /// </summary>
+    Task<IReadOnlyList<GuardMethod>> MethodsAsync(CancellationToken cancellationToken);
 
     Task<GuardSendResult> SendAsync(GuardMessage message, CancellationToken cancellationToken);
 }

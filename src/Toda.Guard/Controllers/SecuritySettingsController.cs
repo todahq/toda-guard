@@ -127,8 +127,7 @@ public sealed record SecondFactorSettingsInput(List<string>? Methods);
 /// </summary>
 [Route("api/guard/security/second-factor")]
 [Authorize(Policy = TodaPolicies.Admin)]
-public class SecondFactorSettingsController(GuardDb guardDb, SecurityLog audit, Toda.Platform.Channels.ChannelTargetService channelTargets,
-    Toda.Platform.Mail.EmailChannel email) : GuardControllerBase
+public class SecondFactorSettingsController(GuardDb guardDb, SecurityLog audit, IGuardMessenger messenger) : GuardControllerBase
 {
     [HttpGet]
     public async Task<SecondFactorSettingsDto> Get(CancellationToken cancellationToken)
@@ -163,11 +162,7 @@ public class SecondFactorSettingsController(GuardDb guardDb, SecurityLog audit, 
         }, requiresNew: true, cancellationToken);
     }
 
-    /// <summary>Email, then each channel that reaches people one by one and carries messages (SMS, WhatsApp, Slack, the phone app).</summary>
+    /// <summary>The ways the site has of sending a code (the messenger's): email, then each channel that reaches people one by one.</summary>
     private async Task<List<SecondFactorMethodOptionDto>> AvailableAsync(CancellationToken cancellationToken) =>
-    [
-        new(SecondFactorKinds.Email, "Email", await email.ReadyAsync(cancellationToken)),
-        .. (await channelTargets.ChannelsAsync(cancellationToken)).Where(c => c.Personal && c.Kinds.Contains(Toda.Sdk.TemplateKinds.Message))
-            .Select(c => new SecondFactorMethodOptionDto(c.Key, c.Name ?? c.Key, c.Ready)),
-    ];
+        [.. (await messenger.MethodsAsync(cancellationToken)).Select(m => new SecondFactorMethodOptionDto(m.Method, m.Name, m.Ready))];
 }

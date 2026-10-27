@@ -45,6 +45,7 @@ public class GuardMessengerTests
             PickupGuardMessenger messenger = new(Options.Create(new GuardOptions { Messenger = { PickupFolder = folder } }), new NoAccounts(),
                 NullLogger<PickupGuardMessenger>.Instance);
             Assert.Single(await messenger.ReachAsync(Guid.NewGuid(), "dana@toda.example", CancellationToken.None));
+            Assert.Equal([new GuardMethod("email", "Email", true)], await messenger.MethodsAsync(CancellationToken.None));
 
             GuardSendResult sent = await messenger.SendAsync(new GuardMessage(GuardMessageKinds.PasswordReset, null, "dana@toda.example", "Dana",
                 new Dictionary<string, object?> { ["username"] = "dana", ["link"] = "https://toda.example/reset#t", ["minutes"] = 60 }, "ar", "password-reset"),
@@ -58,6 +59,7 @@ public class GuardMessengerTests
 
             PickupGuardMessenger nowhere = new(Options.Create(new GuardOptions()), new NoAccounts(), NullLogger<PickupGuardMessenger>.Instance);
             Assert.Empty(await nowhere.ReachAsync(Guid.NewGuid(), "dana@toda.example", CancellationToken.None));
+            Assert.False(Assert.Single(await nowhere.MethodsAsync(CancellationToken.None)).Ready);
             Assert.Equal(new GuardSendResult(0, 1), await nowhere.SendAsync(new GuardMessage(GuardMessageKinds.PasswordReset, null, "dana@toda.example", null,
                 new Dictionary<string, object?>(), null, "password-reset"), CancellationToken.None));
         }
