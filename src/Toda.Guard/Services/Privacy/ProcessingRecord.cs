@@ -5,19 +5,9 @@ using Toda.Guard.Domain;
 namespace Toda.Guard.Services.Privacy;
 
 /// <summary>
-/// Guard's privacy options (ADR 0082, step 2b): the record of processing's texts by language. A host whose controller has
-/// its own template replaces them (<c>Configure&lt;GuardPrivacyOptions&gt;</c>).
+/// The words of a record of processing in one language; <c>{0}</c> takes a number or a name where a text has one. A host
+/// rewords them or adds a language in <see cref="GuardTextOptions.Record"/> (Guard:Texts, ADR 0087).
 /// </summary>
-public sealed class GuardPrivacyOptions
-{
-    public Dictionary<string, ProcessingRecordTexts> RecordTexts { get; } = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["en"] = ProcessingRecordTexts.English,
-        ["ar"] = ProcessingRecordTexts.Arabic,
-    };
-}
-
-/// <summary>The words of a record of processing in one language; <c>{0}</c> takes a number or a name where a text has one.</summary>
 public sealed record ProcessingRecordTexts
 {
     public required string Title { get; init; }

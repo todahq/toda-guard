@@ -24,7 +24,7 @@ public sealed record PrivacySettingsInput(PrivacyContactDto? Controller, Privacy
 /// </summary>
 [Route("api/guard/privacy")]
 [Authorize(Policy = GuardPolicies.Admin)]
-public class PrivacyController(PersonalDataCatalog catalog, IPluginPersonalDataSource plugins, GuardDb guardDb, SecurityLog audit, IOptions<GuardPrivacyOptions> options)
+public class PrivacyController(PersonalDataCatalog catalog, IPluginPersonalDataSource plugins, GuardDb guardDb, SecurityLog audit, IOptions<GuardOptions> options)
     : GuardControllerBase
 {
     private const int NameLength = 200;
@@ -135,10 +135,12 @@ public class PrivacyController(PersonalDataCatalog catalog, IPluginPersonalDataS
             throw new UserFriendlyException("The record comes as markdown or csv.", "bad_format");
         }
 
-        if (!options.Value.RecordTexts.TryGetValue(language, out ProcessingRecordTexts? texts))
+        if (!options.Value.Texts.Record.ContainsKey(language))
         {
-            throw new UserFriendlyException($"The record comes in {string.Join(", ", options.Value.RecordTexts.Keys)}.", "bad_language");
+            throw new UserFriendlyException($"The record comes in {string.Join(", ", options.Value.Texts.Record.Keys)}.", "bad_language");
         }
+
+        ProcessingRecordTexts texts = options.Value.Texts.RecordIn(language);
 
         PrivacyMapDto map = await catalog.MapAsync(cancellationToken);
         DateTime now = DateTime.UtcNow;

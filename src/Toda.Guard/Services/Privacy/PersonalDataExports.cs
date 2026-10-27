@@ -27,7 +27,7 @@ public sealed record DataExportSummary(IReadOnlyDictionary<string, int> Rows, IR
 /// plugin's runs under its own lease, taken for it and released when it's done.
 /// </summary>
 public sealed class PersonalDataExports(PersonalDataCatalog catalog, IGuardExtensions extensions, IServiceProvider services, GuardDb guardDb,
-    IOptions<GuardPrivacyOptions> options, ILogger<PersonalDataExports> logger) : ITransientDependency
+    IOptions<GuardOptions> options, ILogger<PersonalDataExports> logger) : ITransientDependency
 {
     /// <summary>An account's subject: its id, with its own address and the verified ones it added, so mail to them is found.</summary>
     public Task<PersonalDataSubject?> SubjectOfAccountAsync(Guid accountId, CancellationToken cancellationToken) =>
@@ -57,8 +57,8 @@ public sealed class PersonalDataExports(PersonalDataCatalog catalog, IGuardExten
     internal async Task<DataExportSummary> WriteAsync(Stream output, PrivacyMapDto map, PersonalDataSubject subject, string about, string requestedBy,
         string language, bool files, CancellationToken cancellationToken)
     {
-        ExportTexts texts = ExportTexts.For(language);
-        ProcessingRecordTexts record = options.Value.RecordTexts.TryGetValue(language, out ProcessingRecordTexts? found) ? found : ProcessingRecordTexts.English;
+        PersonalDataExportTexts texts = options.Value.Texts.ExportIn(language);
+        ProcessingRecordTexts record = options.Value.Texts.RecordIn(language);
         DateTime madeAt = DateTime.UtcNow;
         ZipWriter writer = new(subject, requestedBy, language, files);
         List<DataExportMissing> missing = [];
@@ -147,7 +147,7 @@ public sealed class PersonalDataExports(PersonalDataCatalog catalog, IGuardExten
         }
     }
 
-    private static string Readme(PrivacyMapDto map, ExportTexts t, ProcessingRecordTexts record, string about, string requestedBy, DateTime madeAt)
+    private static string Readme(PrivacyMapDto map, PersonalDataExportTexts t, ProcessingRecordTexts record, string about, string requestedBy, DateTime madeAt)
     {
         string Text(LocalizedText text) => t.Language == "ar" ? text.Ar : text.En;
         StringBuilder md = new();
@@ -318,43 +318,45 @@ public sealed class PersonalDataExports(PersonalDataCatalog catalog, IGuardExten
             return safe.Trim().Trim('.') is { Length: > 0 } trimmed ? trimmed[..Math.Min(trimmed.Length, 150)] : "file";
         }
     }
+}
 
-    /// <summary>The export's own words, by language; English for one Guard doesn't have.</summary>
-    private sealed record ExportTexts(string Language, string Title, string Intro, string ByPerson, string ByAdmin, string Layout, string Redact, string Stores,
-        string NoExporter, string NotDeclared, string Failed, string TurnedOff)
-    {
-        private static readonly ExportTexts English = new("en",
-            "Personal data",
-            "The data this site keeps about {0}, as it was on {1} (UTC), asked for by {2}.",
-            "the person themself",
-            "a site admin",
-            "Each store of data that holds something about this person is a folder, with its rows as JSON; files are under `files/`. "
-            + "`index.json` says how many rows each store holds, and which stores aren't here and why. Only what's about this person or by them "
-            + "is here: not other people's comments, nor the fields of records they didn't write.",
-            "Rows marked `\"noLongerReadable\": true` are on items the person can no longer open (a project they left). The controller may "
-            + "redact them before handing this export over.",
-            "What the site keeps",
-            "Nothing exports this store for one person.",
-            "Its module or plugin doesn't declare this store.",
-            "Its export failed; the site's log says why.",
-            "Its plugin was turned off during the export.");
+/// <summary>
+/// A person's data export's own words in one language (ADR 0082, step 3): its README, and why a store isn't in it. A host
+/// rewords them or adds a language in <see cref="GuardTextOptions.Export"/> (Guard:Texts, ADR 0087).
+/// </summary>
+public sealed record PersonalDataExportTexts(string Language, string Title, string Intro, string ByPerson, string ByAdmin, string Layout, string Redact, string Stores,
+    string NoExporter, string NotDeclared, string Failed, string TurnedOff)
+{
+    public static readonly PersonalDataExportTexts English = new("en",
+        "Personal data",
+        "The data this site keeps about {0}, as it was on {1} (UTC), asked for by {2}.",
+        "the person themself",
+        "a site admin",
+        "Each store of data that holds something about this person is a folder, with its rows as JSON; files are under `files/`. "
+        + "`index.json` says how many rows each store holds, and which stores aren't here and why. Only what's about this person or by them "
+        + "is here: not other people's comments, nor the fields of records they didn't write.",
+        "Rows marked `\"noLongerReadable\": true` are on items the person can no longer open (a project they left). The controller may "
+        + "redact them before handing this export over.",
+        "What the site keeps",
+        "Nothing exports this store for one person.",
+        "Its module or plugin doesn't declare this store.",
+        "Its export failed; the site's log says why.",
+        "Its plugin was turned off during the export.");
 
-        private static readonly ExportTexts Arabic = new("ar",
-            "البيانات الشخصية",
-            "البيانات التي يحفظها هذا الموقع عن {0} كما كانت في {1} (بالتوقيت العالمي)، بطلب من {2}.",
-            "الشخص نفسه",
-            "مشرف الموقع",
-            "كل مخزن بيانات يحوي شيئًا عن هذا الشخص مجلدٌ فيه صفوفه بصيغة JSON، والملفات في `files/`. "
-            + "يذكر `index.json` عدد صفوف كل مخزن، والمخازن غير الموجودة هنا ولماذا. لا يوجد هنا إلا ما يخص هذا الشخص أو ما كتبه: "
-            + "لا تعليقات الآخرين، ولا حقول السجلات التي لم يكتبها.",
-            "الصفوف الموسومة بـ `\"noLongerReadable\": true` عن عناصر لم يعد الشخص يستطيع فتحها (مشروع غادره). لجهة التحكم أن تحجبها "
-            + "قبل تسليم هذا التصدير.",
-            "ما يحفظه الموقع",
-            "لا شيء يصدّر هذا المخزن لشخص واحد.",
-            "لا تعلن وحدته أو إضافته هذا المخزن.",
-            "فشل تصديره، وسجل الموقع يذكر السبب.",
-            "عُطّلت إضافته أثناء التصدير.");
+    public static readonly PersonalDataExportTexts Arabic = new("ar",
+        "البيانات الشخصية",
+        "البيانات التي يحفظها هذا الموقع عن {0} كما كانت في {1} (بالتوقيت العالمي)، بطلب من {2}.",
+        "الشخص نفسه",
+        "مشرف الموقع",
+        "كل مخزن بيانات يحوي شيئًا عن هذا الشخص مجلدٌ فيه صفوفه بصيغة JSON، والملفات في `files/`. "
+        + "يذكر `index.json` عدد صفوف كل مخزن، والمخازن غير الموجودة هنا ولماذا. لا يوجد هنا إلا ما يخص هذا الشخص أو ما كتبه: "
+        + "لا تعليقات الآخرين، ولا حقول السجلات التي لم يكتبها.",
+        "الصفوف الموسومة بـ `\"noLongerReadable\": true` عن عناصر لم يعد الشخص يستطيع فتحها (مشروع غادره). لجهة التحكم أن تحجبها "
+        + "قبل تسليم هذا التصدير.",
+        "ما يحفظه الموقع",
+        "لا شيء يصدّر هذا المخزن لشخص واحد.",
+        "لا تعلن وحدته أو إضافته هذا المخزن.",
+        "فشل تصديره، وسجل الموقع يذكر السبب.",
+        "عُطّلت إضافته أثناء التصدير.");
 
-        public static ExportTexts For(string language) => language.StartsWith("ar", StringComparison.OrdinalIgnoreCase) ? Arabic : English;
-    }
 }

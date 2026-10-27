@@ -1,3 +1,5 @@
+using Toda.Guard.Services.Privacy;
+
 namespace Toda.Guard;
 
 /// <summary>The kinds of message Guard sends (ADR 0087); each is also the key of its template.</summary>
@@ -63,6 +65,39 @@ public sealed class GuardTextOptions
     /// <see cref="GuardMessageTemplates.For"/>'s and change what differs (<c>template with { Texts = ... }</c>).
     /// </summary>
     public Dictionary<string, GuardMessageTemplate> Messages { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The record of processing's words by language (ADR 0082), English and Arabic by default: a host adds a language, or
+    /// rewords one (<c>ProcessingRecordTexts.English with { Title = ... }</c>).
+    /// </summary>
+    public Dictionary<string, ProcessingRecordTexts> Record { get; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["en"] = ProcessingRecordTexts.English,
+        ["ar"] = ProcessingRecordTexts.Arabic,
+    };
+
+    /// <summary>A person's data export's words by language (its README and why a store isn't in it; ADR 0082, step 3), as <see cref="Record"/>.</summary>
+    public Dictionary<string, PersonalDataExportTexts> Export { get; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["en"] = PersonalDataExportTexts.English,
+        ["ar"] = PersonalDataExportTexts.Arabic,
+    };
+
+    /// <summary>The record's words in a language ("ar" for "ar-SA"), English's when it has none, naming the host's product.</summary>
+    public ProcessingRecordTexts RecordIn(string language)
+    {
+        string lang = Base(language);
+        ProcessingRecordTexts texts = Record.TryGetValue(lang, out ProcessingRecordTexts? own) ? own
+            : Record.TryGetValue("en", out ProcessingRecordTexts? english) ? english : ProcessingRecordTexts.English;
+        return texts with { Subjects = texts.Subjects.ToDictionary(p => p.Key, p => GuardMessageTemplates.Naming(p.Value, lang, ProductName)) };
+    }
+
+    /// <summary>The export's words in a language ("ar" for "ar-SA"), English's when it has none.</summary>
+    public PersonalDataExportTexts ExportIn(string language) =>
+        Export.TryGetValue(Base(language), out PersonalDataExportTexts? own) ? own
+        : Export.TryGetValue("en", out PersonalDataExportTexts? english) ? english : PersonalDataExportTexts.English;
+
+    private static string Base(string language) => language.Split('-', 2)[0].ToLowerInvariant();
 }
 
 /// <summary>Guard's own texts for every kind of message it sends (ADR 0087), English and Arabic.</summary>
@@ -91,15 +126,19 @@ public static class GuardMessageTemplates
 
     public static GuardMessageTemplate? Find(GuardTextOptions texts, string key) => For(texts).FirstOrDefault(t => t.Key == key);
 
+    /// <summary>A text of Guard's in a language with the host's product named in place of Toda's; unchanged for Toda's.</summary>
+    internal static string Naming(string text, string language, IReadOnlyDictionary<string, string> product)
+    {
+        string name = product.TryGetValue(language, out string? own) && own is { Length: > 0 } ? own
+            : product.TryGetValue("en", out string? english) && english is { Length: > 0 } ? english
+            : DefaultProductName;
+        return text.Replace(language == "ar" ? DefaultProductNameArabic : DefaultProductName, name, StringComparison.Ordinal);
+    }
+
     /// <summary>The template with the host's product named in place of Toda's, language by language; unchanged for Toda's.</summary>
     private static GuardMessageTemplate Named(GuardMessageTemplate template, IReadOnlyDictionary<string, string> product)
     {
-        string Name(string language) =>
-            product.TryGetValue(language, out string? name) && name is { Length: > 0 } ? name
-            : product.TryGetValue("en", out string? english) && english is { Length: > 0 } ? english
-            : DefaultProductName;
-        string In(string language, string text) =>
-            text.Replace(language == "ar" ? DefaultProductNameArabic : DefaultProductName, Name(language), StringComparison.Ordinal);
+        string In(string language, string text) => Naming(text, language, product);
         Dictionary<string, string> Each(IReadOnlyDictionary<string, string> texts) => texts.ToDictionary(p => p.Key, p => In(p.Key, p.Value));
 
         return template with

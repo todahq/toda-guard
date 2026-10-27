@@ -70,7 +70,7 @@ public class PersonalDataExportTests
             services.AddSingleton(exporter);
         }
 
-        PersonalDataExports exports = new(null!, plugins, services.BuildServiceProvider(), null!, Options.Create(new GuardPrivacyOptions()),
+        PersonalDataExports exports = new(null!, plugins, services.BuildServiceProvider(), null!, Options.Create(new GuardOptions()),
             NullLogger<PersonalDataExports>.Instance);
         using MemoryStream zip = new();
         DataExportSummary summary = await exports.WriteAsync(zip, Site, Mona, "Mona", requestedBy, "en", files, CancellationToken.None);
@@ -193,7 +193,7 @@ public class PersonalDataExportTests
     public async Task The_readme_is_in_the_language_asked_for()
     {
         ServiceCollection services = new();
-        PersonalDataExports exports = new(null!, new Plugins(), services.BuildServiceProvider(), null!, Options.Create(new GuardPrivacyOptions()),
+        PersonalDataExports exports = new(null!, new Plugins(), services.BuildServiceProvider(), null!, Options.Create(new GuardOptions()),
             NullLogger<PersonalDataExports>.Instance);
         using MemoryStream zip = new();
         await exports.WriteAsync(zip, Site, Mona, "Mona", PersonalDataRequesters.Person, "ar", false, CancellationToken.None);
@@ -205,5 +205,24 @@ public class PersonalDataExportTests
         Assert.Contains("# البيانات الشخصية", text);
         Assert.Contains("اسم crm.contacts", text);
         JsonDocument.Parse(new StreamReader(read.GetEntry("index.json")!.Open()).ReadToEnd()).Dispose();
+    }
+
+    [Fact]
+    public async Task A_host_words_its_export_and_the_record_it_quotes_in_GuardOptions_Texts()
+    {
+        GuardOptions options = new();
+        options.Texts.Export["en"] = PersonalDataExportTexts.English with { Title = "Your data, as we hold it" };
+        options.Texts.Record["en"] = ProcessingRecordTexts.English with { Kept = "Held" };
+        PersonalDataExports exports = new(null!, new Plugins(), new ServiceCollection().BuildServiceProvider(), null!, Options.Create(options),
+            NullLogger<PersonalDataExports>.Instance);
+        using MemoryStream zip = new();
+        await exports.WriteAsync(zip, Site, Mona, "Mona", PersonalDataRequesters.Person, "en-GB", false, CancellationToken.None);
+
+        zip.Position = 0;
+        using ZipArchive read = new(zip, ZipArchiveMode.Read);
+        using StreamReader readme = new(read.GetEntry("README.md")!.Open(), Encoding.UTF8);
+        string text = readme.ReadToEnd();
+        Assert.StartsWith("# Your data, as we hold it\n", text);
+        Assert.Contains("Held: ", text);
     }
 }
