@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
-using Toda.Sdk;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Uow;
 

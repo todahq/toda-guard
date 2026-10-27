@@ -14,8 +14,6 @@ using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Toda.Guard.Directories;
 using Toda.Guard.Services;
-using Toda.Platform;
-using Toda.Platform.Plugins;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.EntityFrameworkCore.DistributedEvents;
 using Volo.Abp.EventBus.Distributed;
@@ -23,7 +21,8 @@ using Volo.Abp.Modularity;
 
 namespace Toda.Guard;
 
-[DependsOn(typeof(TodaPlatformModule))]
+[DependsOn(typeof(TodaGuardActingModule), typeof(Volo.Abp.AspNetCore.Mvc.AbpAspNetCoreMvcModule),
+    typeof(Volo.Abp.EntityFrameworkCore.PostgreSql.AbpEntityFrameworkCorePostgreSqlModule))]
 public class TodaGuardModule : AbpModule
 {
     /// <summary>The default authentication scheme: it sends each bearer token to the handler for its kind, and a browser's cookie to its session's.</summary>

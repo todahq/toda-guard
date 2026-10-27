@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
-using Toda.Sdk;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
 using Microsoft.Extensions.Options;

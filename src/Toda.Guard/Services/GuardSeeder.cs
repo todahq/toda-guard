@@ -5,7 +5,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
-using Toda.Platform.Jobs;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;

@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Controllers;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
-using Toda.Sdk;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
