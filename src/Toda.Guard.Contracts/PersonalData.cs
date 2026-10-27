@@ -190,9 +190,42 @@ public interface IPluginPersonalDataSource
 /// </summary>
 public sealed record PersonalDataSubject(Guid? AccountId, IReadOnlyList<string> Emails, IReadOnlyList<string> Phones)
 {
+    /// <summary>The fewest digits a phone is compared by, so a short number never stands for many.</summary>
+    public const int MinPhoneDigits = 6;
+
     /// <summary>Someone outside Toda by an address: an email in lower case, as addresses are compared.</summary>
     public static PersonalDataSubject Outside(string? email, string? phone) =>
         new(null, string.IsNullOrWhiteSpace(email) ? [] : [email.Trim().ToLowerInvariant()], string.IsNullOrWhiteSpace(phone) ? [] : [phone.Trim()]);
+
+    /// <summary>
+    /// Whether a value is wholly one of the subject's: their account's id, one of their emails in any case, or one of their
+    /// phones by its digits. A value that only contains one ("mali@example.com" for "ali@example.com") isn't.
+    /// </summary>
+    public bool Holds(string? value)
+    {
+        string trimmed = value?.Trim() ?? "";
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        if (AccountId is { } id && Guid.TryParse(trimmed, out Guid guid) && guid == id)
+        {
+            return true;
+        }
+
+        if (Emails.Any(e => string.Equals(e, trimmed, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        string digits = Digits(trimmed);
+        return digits.Length >= MinPhoneDigits && trimmed.All(c => char.IsAsciiDigit(c) || c is '+' or ' ' or '-' or '(' or ')' or '.')
+            && Phones.Any(p => Digits(p) == digits);
+    }
+
+    /// <summary>A phone's digits, how phones are compared: "+966 50 123 4567" is "966501234567".</summary>
+    public static string Digits(string phone) => new([.. phone.Where(char.IsAsciiDigit)]);
 }
 
 /// <summary>
