@@ -35,4 +35,8 @@ public class TodaGuardActingModule : AbpModule
             options.Map(GuardErrorCodes.StepUpRequired, System.Net.HttpStatusCode.Forbidden);
             options.Map(GuardErrorCodes.TooManyRequests, System.Net.HttpStatusCode.TooManyRequests);
         });
+
+    /// <summary>After every module has registered its services: Guard's status finder, unless the host has its own.</summary>
+    public override void PostConfigureServices(ServiceConfigurationContext context) =>
+        GuardHttpExceptionStatusCodeFinder.UseUnlessTheHostHasItsOwn(context.Services);
 }
