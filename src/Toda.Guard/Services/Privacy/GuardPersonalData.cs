@@ -84,5 +84,6 @@ public sealed class GuardPersonalData : IPersonalDataDeclarations, ITransientDep
         new("guard.oidc_applications", "the apps that may sign people in"),
         new("guard.oidc_scopes", "what those apps may ask for"),
         new("guard.oidc_keys", "the keys sign-in tokens are signed with"),
+        new("guard.data_protection_keys", "the keys Data Protection protects secrets with, for a host that keeps them in Guard's database"),
     ];
 }
