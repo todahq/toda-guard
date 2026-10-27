@@ -20,6 +20,12 @@ public sealed class GuardOptions
     /// </summary>
     public string AdminsGroupName { get; set; } = "toda-admins";
 
+    /// <summary>
+    /// The scope of the host's own API in the tokens Guard issues (Toda's toda.api by default): what the web's and the
+    /// phone's tokens carry and apps are granted. A host's clients and its MCP metadata name the same.
+    /// </summary>
+    public string ApiScope { get; set; } = Controllers.GuardOidc.ApiScope;
+
     /// <summary>The browser's cookies Guard sets and reads; Toda's names by default.</summary>
     public GuardCookieOptions Cookies { get; set; } = new();
 

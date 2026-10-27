@@ -51,7 +51,8 @@ public static class OAuthAgents
     /// <summary>What a person allowed an app: read, or read and write.</summary>
     public const string AccessProperty = "toda_access";
 
-    public static readonly ImmutableArray<string> GrantedScopes = [GuardOidc.ApiScope, Scopes.OfflineAccess];
+    /// <summary>What an app a person allows is granted: the host's API (GuardOptions.ApiScope) and refreshing.</summary>
+    public static ImmutableArray<string> GrantedScopes(string apiScope) => [apiScope, Scopes.OfflineAccess];
 }
 
 /// <summary>
@@ -266,7 +267,7 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
             [.. (await applications.GetRedirectUrisAsync(app, cancellationToken)).Order(StringComparer.Ordinal)], people);
     }
 
-    private static OpenIddictApplicationDescriptor Descriptor(string clientId, string name, List<Uri> redirects, string? secret, string kind)
+    private OpenIddictApplicationDescriptor Descriptor(string clientId, string name, List<Uri> redirects, string? secret, string kind)
     {
         OpenIddictApplicationDescriptor descriptor = new()
         {
@@ -283,7 +284,7 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
                 Permissions.GrantTypes.AuthorizationCode,
                 Permissions.GrantTypes.RefreshToken,
                 Permissions.ResponseTypes.Code,
-                Permissions.Prefixes.Scope + GuardOidc.ApiScope,
+                Permissions.Prefixes.Scope + options.Value.ApiScope,
                 Permissions.Prefixes.Scope + Scopes.OfflineAccess,
                 Permissions.Prefixes.Scope + OAuthAgents.ReadScope,
             },

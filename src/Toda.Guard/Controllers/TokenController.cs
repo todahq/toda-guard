@@ -229,7 +229,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
     /// <summary>The second step's code was wrong; the ticket has tries left.</summary>
     public const string SecondFactorFailedError = "second_factor_failed";
 
-    private static ClaimsPrincipal CreatePrincipal(Account account, IEnumerable<string> scopes, DateTimeOffset? authTime, bool secondFactor = false)
+    private ClaimsPrincipal CreatePrincipal(Account account, IEnumerable<string> scopes, DateTimeOffset? authTime, bool secondFactor = false)
     {
         ClaimsIdentity identity = new(
             OpenIddictServerAspNetCoreDefaults.AuthenticationScheme,
@@ -247,7 +247,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
                 .SetClaims(Claims.AuthenticationMethodReference, secondFactor ? ["pwd", "otp", "mfa"] : ["pwd"]);
         }
 
-        identity.SetScopes(scopes.Intersect([Scopes.OfflineAccess, GuardOidc.ApiScope]));
+        identity.SetScopes(scopes.Intersect([Scopes.OfflineAccess, options.Value.ApiScope]));
         identity.SetDestinations(_ => [Destinations.AccessToken]);
         return new ClaimsPrincipal(identity);
     }
@@ -265,6 +265,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
 public static class GuardOidc
 {
     /// <summary>The scope every Toda API call needs.</summary>
+    /// <summary>Toda's API scope: <see cref="GuardOptions.ApiScope"/>'s default.</summary>
     public const string ApiScope = "toda.api";
 
     /// <summary>The first-party Next.js server (a confidential client).</summary>

@@ -88,6 +88,9 @@ public class TodaGuardModule : AbpModule
             options.UseOpenIddict<Guid>();
         });
 
+        // The host's API scope (GuardOptions.ApiScope, toda.api by default), as the host configured it.
+        context.Services.AddOptions<OpenIddict.Server.OpenIddictServerOptions>()
+            .Configure<Microsoft.Extensions.Options.IOptions<GuardOptions>>((server, guard) => server.Scopes.Add(guard.Value.ApiScope));
         context.Services.AddOpenIddict()
             .AddCore(options => options.UseEntityFrameworkCore().UseDbContext<OidcDbContext>().ReplaceDefaultEntities<Guid>())
             .AddServer(options =>
@@ -98,7 +101,7 @@ public class TodaGuardModule : AbpModule
                     .SetAuthorizationEndpointUris("connect/authorize");
                 options.AllowPasswordFlow().AllowRefreshTokenFlow().AllowAuthorizationCodeFlow().RequireProofKeyForCodeExchange()
                     .AllowCustomFlow(Controllers.TokenController.SecondFactorGrant); // the second step (ADR 0082)
-                options.RegisterScopes(OpenIddictConstants.Scopes.OfflineAccess, GuardOidc.ApiScope, OAuthAgents.ReadScope);
+                options.RegisterScopes(OpenIddictConstants.Scopes.OfflineAccess, OAuthAgents.ReadScope);
                 // Revoking the phone app's (or a script's) refresh token ends its whole sign-in (ADR 0075).
                 options.AddEventHandler(EndSignInOnRevocation.Descriptor);
                 // MCP clients register themselves (RFC 7591) at the endpoint the discovery document names.

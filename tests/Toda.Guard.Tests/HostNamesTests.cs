@@ -18,6 +18,8 @@ public class HostNamesTests
         Assert.Equal(("/signup/verify", "/reset-password", "/emails/verify", "/oauth/consent"),
             (options.Pages.SignUpVerify, options.Pages.PasswordReset, options.Pages.AddressVerify, options.Pages.Consent));
         Assert.Equal((GuardOidc.WebClientId, GuardOidc.MobileClientId), (options.Clients.Web, options.Clients.Mobile));
+        Assert.Equal("toda.api", options.ApiScope);
+        Assert.Equal(["toda.api", "offline_access"], Services.OAuthAgents.GrantedScopes(options.ApiScope).ToArray());
     }
 
     [Fact]

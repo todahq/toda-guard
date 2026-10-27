@@ -87,8 +87,8 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb, IOptions<G
         string access = request.GetParameter(AccessParameter)?.ToString() == TokenAccess.Write && !request.HasScope(OAuthAgents.ReadScope)
             ? TokenAccess.Write
             : TokenAccess.Read;
-        string authorizationId = await apps.AllowAsync(accountId, request.ClientId!, access, OAuthAgents.GrantedScopes, cancellationToken);
-        return SignIn(AppPrincipals.For(account, authorizationId, access, OAuthAgents.GrantedScopes), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        string authorizationId = await apps.AllowAsync(accountId, request.ClientId!, access, OAuthAgents.GrantedScopes(options.Value.ApiScope), cancellationToken);
+        return SignIn(AppPrincipals.For(account, authorizationId, access, OAuthAgents.GrantedScopes(options.Value.ApiScope)), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 
     private ForbidResult Refuse(string error, string description) =>
