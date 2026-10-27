@@ -23,7 +23,7 @@ public interface IGuardLocks
 /// </summary>
 public sealed class PostgresGuardLocks(IConfiguration configuration) : IGuardLocks
 {
-    private readonly string? _connectionString = configuration.GetConnectionString("Guard") ?? configuration.GetConnectionString("Default");
+    private readonly string? _connectionString = Data.GuardConnection.Of(configuration);
 
     public async Task<IAsyncDisposable?> TryTakeAsync(string name, CancellationToken cancellationToken)
     {

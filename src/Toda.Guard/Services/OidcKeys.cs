@@ -33,7 +33,7 @@ public static class OidcKeys
 
         (string SigningPem, string EncryptionKey) stored = configuration["Guard:Oidc:KeysPath"] is { Length: > 0 } folder
             ? FromFolder(Path.GetFullPath(folder))
-            : configuration.GetConnectionString("Default") is { Length: > 0 } connectionString
+            : Data.GuardConnection.Of(configuration) is { Length: > 0 } connectionString
                 ? FromDatabase(connectionString, Path.Combine(dataRoot, "oidc-keys"))
                 : FromFolder(Path.Combine(dataRoot, "oidc-keys"));
         return (signing ?? Signing(stored.SigningPem), encryption ?? Encryption(stored.EncryptionKey));

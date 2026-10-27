@@ -80,7 +80,7 @@ public class TodaGuardModule : AbpModule
 
         context.Services.AddDbContext<OidcDbContext>(options =>
         {
-            options.UseNpgsql(configuration.GetConnectionString("Default"),
+            options.UseNpgsql(GuardConnection.Of(configuration),
                 npgsql => npgsql.MigrationsHistoryTable(OidcDbContext.HistoryTable, GuardDbContext.Schema));
             options.UseOpenIddict<Guid>();
         });

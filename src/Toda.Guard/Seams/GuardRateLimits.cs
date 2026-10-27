@@ -46,7 +46,7 @@ public sealed class PostgresGuardRateLimits(IConfiguration configuration) : IGua
         CREATE INDEX IF NOT EXISTS "IX_rate_limits_KeyHash_At" ON guard.rate_limits ("KeyHash", "At");
         """;
 
-    private readonly string? _connectionString = configuration.GetConnectionString("Guard") ?? configuration.GetConnectionString("Default");
+    private readonly string? _connectionString = Data.GuardConnection.Of(configuration);
     private readonly InMemoryWindows _memory = new();
     private volatile bool _made;
 

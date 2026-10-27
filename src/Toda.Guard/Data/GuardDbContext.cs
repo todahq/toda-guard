@@ -6,7 +6,8 @@ using Volo.Abp.EntityFrameworkCore.DistributedEvents;
 
 namespace Toda.Guard.Data;
 
-[ConnectionStringName("Default")]
+// ConnectionStrings:Guard, else Default (ABP falls back to it): GuardConnection.
+[ConnectionStringName(GuardConnection.Name)]
 public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbContext<GuardDbContext>(options), IHasEventOutbox
 {
     public const string Schema = "guard";
