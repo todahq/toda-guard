@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Directories;
 using Toda.Guard.Domain;
-using Toda.Sdk;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
