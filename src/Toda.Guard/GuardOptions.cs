@@ -43,6 +43,9 @@ public sealed class GuardOptions
 
     /// <summary>The default messenger's pickup folder (<see cref="IGuardMessenger"/>).</summary>
     public GuardMessengerOptions Messenger { get; set; } = new();
+
+    /// <summary>The product's name in Guard's messages, and a host's own templates for them; Toda's texts by default.</summary>
+    public GuardTextOptions Texts { get; set; } = new();
 }
 
 /// <summary>

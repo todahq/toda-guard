@@ -7,8 +7,8 @@ using Microsoft.Extensions.Options;
 namespace Toda.Guard;
 
 /// <summary>
-/// The default messenger (ADR 0087): email only, each message rendered from Guard's own texts
-/// (<see cref="GuardMessageTemplates"/>) in the recipient's language, else the message's, else English, and written as a
+/// The default messenger (ADR 0087): email only, each message rendered from Guard's texts, or the host's
+/// (<see cref="GuardOptions.Texts"/>), in the recipient's language, else the message's, else English, and written as a
 /// file to <see cref="GuardMessengerOptions.PickupFolder"/>, for Development and tests. Without a folder nothing reaches
 /// anyone, and a send says so. It never logs a message's text.
 /// </summary>
@@ -39,7 +39,7 @@ public sealed partial class PickupGuardMessenger(IOptions<GuardOptions> options,
         }
 
         if (Folder is not { } folder || message.Channel is not null || to is not { Length: > 0 }
-            || GuardMessageTemplates.Find(message.Kind) is not { } template)
+            || GuardMessageTemplates.Find(options.Value.Texts, message.Kind) is not { } template)
         {
             logger.LogWarning("Guard's {Kind} message reached no one: the default messenger sends email to a pickup folder only", message.Kind);
             return new GuardSendResult(0, 1);

@@ -45,10 +45,35 @@ public sealed record GuardMessageTemplate(
     IReadOnlyList<GuardTemplateVariable> Variables,
     IReadOnlyDictionary<string, object?> Sample);
 
+/// <summary>
+/// The texts a host gives Guard's messages without forking it (ADR 0087): the product's name in Guard's own texts, and a
+/// whole template of its own for any kind. Toda keeps the defaults, so its texts are Guard's as they are.
+/// </summary>
+public sealed class GuardTextOptions
+{
+    /// <summary>The product's name by language, in place of Toda (تودا) in Guard's own texts; a language without one uses English's.</summary>
+    public Dictionary<string, string> ProductName { get; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["en"] = GuardMessageTemplates.DefaultProductName,
+        ["ar"] = GuardMessageTemplates.DefaultProductNameArabic,
+    };
+
+    /// <summary>
+    /// A host's own template for a kind (<see cref="GuardMessageKinds"/>), in place of Guard's, set in code; start from
+    /// <see cref="GuardMessageTemplates.For"/>'s and change what differs (<c>template with { Texts = ... }</c>).
+    /// </summary>
+    public Dictionary<string, GuardMessageTemplate> Messages { get; } = new(StringComparer.Ordinal);
+}
+
 /// <summary>Guard's own texts for every kind of message it sends (ADR 0087), English and Arabic.</summary>
 public static class GuardMessageTemplates
 {
-    public static IReadOnlyList<GuardMessageTemplate> All { get; } =
+    /// <summary>The product Guard's own texts name: Toda's, in English and Arabic.</summary>
+    public const string DefaultProductName = "Toda";
+
+    public const string DefaultProductNameArabic = "تودا";
+
+    private static readonly GuardMessageTemplate[] Builtin =
     [
         Services.SelfServiceMail.VerifyDefinition,
         Services.SelfServiceMail.ResetDefinition,
@@ -57,5 +82,31 @@ public static class GuardMessageTemplates
         Services.TwoFactor.SecondFactorMail.CodeMessageDefinition,
     ];
 
-    public static GuardMessageTemplate? Find(string key) => All.FirstOrDefault(t => t.Key == key);
+    /// <summary>Guard's own texts, as they are (naming Toda).</summary>
+    public static IReadOnlyList<GuardMessageTemplate> All => Builtin;
+
+    /// <summary>The templates a host's messages use: its own where it gave one, else Guard's, naming its product.</summary>
+    public static IReadOnlyList<GuardMessageTemplate> For(GuardTextOptions texts) =>
+        [.. Builtin.Select(t => texts.Messages.TryGetValue(t.Key, out GuardMessageTemplate? own) ? own : Named(t, texts.ProductName))];
+
+    public static GuardMessageTemplate? Find(GuardTextOptions texts, string key) => For(texts).FirstOrDefault(t => t.Key == key);
+
+    /// <summary>The template with the host's product named in place of Toda's, language by language; unchanged for Toda's.</summary>
+    private static GuardMessageTemplate Named(GuardMessageTemplate template, IReadOnlyDictionary<string, string> product)
+    {
+        string Name(string language) =>
+            product.TryGetValue(language, out string? name) && name is { Length: > 0 } ? name
+            : product.TryGetValue("en", out string? english) && english is { Length: > 0 } ? english
+            : DefaultProductName;
+        string In(string language, string text) =>
+            text.Replace(language == "ar" ? DefaultProductNameArabic : DefaultProductName, Name(language), StringComparison.Ordinal);
+        Dictionary<string, string> Each(IReadOnlyDictionary<string, string> texts) => texts.ToDictionary(p => p.Key, p => In(p.Key, p.Value));
+
+        return template with
+        {
+            Names = Each(template.Names),
+            Descriptions = Each(template.Descriptions),
+            Texts = template.Texts.ToDictionary(p => p.Key, p => new GuardTemplateText(p.Value.Subject is { } subject ? In(p.Key, subject) : null, In(p.Key, p.Value.Body))),
+        };
+    }
 }

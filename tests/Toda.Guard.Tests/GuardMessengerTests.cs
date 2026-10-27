@@ -29,6 +29,38 @@ public class GuardMessengerTests
     }
 
     [Fact]
+    public void A_host_names_its_product_or_gives_its_own_template_and_Toda_keeps_its_texts()
+    {
+        // Toda keeps the defaults: its texts are Guard's own, word for word.
+        GuardTextOptions toda = new();
+        Assert.All(GuardMessageTemplates.For(toda).Zip(GuardMessageTemplates.All), pair =>
+        {
+            Assert.Equal(pair.Second.Names, pair.First.Names);
+            Assert.Equal(pair.Second.Descriptions, pair.First.Descriptions);
+            Assert.Equal(pair.Second.Texts, pair.First.Texts);
+        });
+
+        // Another product names itself; a language it didn't name uses its English name.
+        GuardTextOptions market = new();
+        market.ProductName["en"] = "Market";
+        market.ProductName.Remove("ar");
+        GuardMessageTemplate reset = GuardMessageTemplates.Find(market, GuardMessageKinds.PasswordReset)!;
+        Assert.Equal("Reset your Market password", reset.Texts["en"].Subject);
+        Assert.Contains("Market", reset.Texts["ar"].Body);
+        Assert.DoesNotContain(GuardMessageTemplates.All, t => t.Texts.Values.Any(x => x.Body.Contains("Market", StringComparison.Ordinal)));
+        Assert.All(GuardMessageTemplates.For(market), t => Assert.All(t.Texts.Values, x =>
+        {
+            Assert.DoesNotContain("Toda", x.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain("تودا", x.Body, StringComparison.Ordinal);
+        }));
+
+        // Or gives a whole template of its own for a kind.
+        GuardMessageTemplate own = reset with { Texts = new Dictionary<string, GuardTemplateText> { ["en"] = new("New password", "Go to {{ link }}") } };
+        market.Messages[GuardMessageKinds.PasswordReset] = own;
+        Assert.Same(own, GuardMessageTemplates.Find(market, GuardMessageKinds.PasswordReset));
+    }
+
+    [Fact]
     public void Values_are_filled_by_their_path_and_missing_ones_left_empty()
     {
         Dictionary<string, object?> model = new() { ["code"] = "482913", ["recipient"] = new Dictionary<string, object?> { ["name"] = "Dana" } };
