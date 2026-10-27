@@ -20,6 +20,15 @@ public sealed class GuardOptions
     /// </summary>
     public string AdminsGroupName { get; set; } = "toda-admins";
 
+    /// <summary>The browser's cookies Guard sets and reads; Toda's names by default.</summary>
+    public GuardCookieOptions Cookies { get; set; } = new();
+
+    /// <summary>The host's pages Guard links to or sends people to; Toda's by default.</summary>
+    public GuardPageOptions Pages { get; set; } = new();
+
+    /// <summary>The host's own OpenID Connect clients, as Guard treats them apart; Toda's by default.</summary>
+    public GuardClientOptions Clients { get; set; } = new();
+
     /// <summary>What the host uses of Guard; each off removes that feature's endpoints (all on by default).</summary>
     public GuardFeatures Features { get; set; } = new();
 
@@ -28,6 +37,45 @@ public sealed class GuardOptions
 
     /// <summary>The default messenger's pickup folder (<see cref="IGuardMessenger"/>).</summary>
     public GuardMessengerOptions Messenger { get; set; } = new();
+}
+
+/// <summary>
+/// The names of a browser session's cookies (ADR 0075): its secret (only the server reads it), the anti-forgery value the
+/// page sends back as X-Toda-Csrf, the phone's embedded mode, and the page's language. A host beside Toda on the same
+/// domain gives its own, so the two don't read each other's.
+/// </summary>
+public sealed class GuardCookieOptions
+{
+    public string Session { get; set; } = "toda_session";
+
+    public string Csrf { get; set; } = "toda_csrf";
+
+    public string Embedded { get; set; } = "toda_embedded";
+
+    public string Language { get; set; } = "NEXT_LOCALE";
+}
+
+/// <summary>The host's pages, as paths on its public address: where mailed links and the OAuth consent go.</summary>
+public sealed class GuardPageOptions
+{
+    public string SignUpVerify { get; set; } = "/signup/verify";
+
+    public string PasswordReset { get; set; } = "/reset-password";
+
+    public string AddressVerify { get; set; } = "/emails/verify";
+
+    public string Consent { get; set; } = "/oauth/consent";
+}
+
+/// <summary>
+/// The host's own clients (OpenID Connect client ids): its web server, which may refresh with a password to step up, and
+/// its phone app, whose sign-ins the person's list shows as their phone. Apps people allow are never these.
+/// </summary>
+public sealed class GuardClientOptions
+{
+    public string Web { get; set; } = "toda-web";
+
+    public string Mobile { get; set; } = "toda-mobile";
 }
 
 /// <summary>A site's time zone (an IANA name), the day its weeks start on, and the languages people may choose.</summary>

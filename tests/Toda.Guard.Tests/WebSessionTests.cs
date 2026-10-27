@@ -86,8 +86,8 @@ public class WebSessionTests
         http.Request.Host = new HostString("toda.test");
         WebSessionHandler.Issue(http, Secret);
         string[] set = http.Response.Headers.SetCookie.ToArray()!;
-        string session = Assert.Single(set, c => c.StartsWith(WebSessionHandler.CookieName + "=", StringComparison.Ordinal));
-        string csrf = Assert.Single(set, c => c.StartsWith(WebSessionHandler.CsrfCookieName + "=", StringComparison.Ordinal));
+        string session = Assert.Single(set, c => c.StartsWith(new GuardCookieOptions().Session + "=", StringComparison.Ordinal));
+        string csrf = Assert.Single(set, c => c.StartsWith(new GuardCookieOptions().Csrf + "=", StringComparison.Ordinal));
         Assert.Contains("httponly", session, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=lax", session, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("httponly", csrf, StringComparison.OrdinalIgnoreCase);
@@ -115,21 +115,21 @@ public class WebSessionTests
     public void A_handoff_marks_the_browser_embedded_and_a_sign_in_unmarks_it()
     {
         static string? Embedded(DefaultHttpContext http) =>
-            http.Response.Headers.SetCookie.ToArray().FirstOrDefault(c => c!.StartsWith(WebSessionHandler.EmbeddedCookieName + "=", StringComparison.Ordinal));
+            http.Response.Headers.SetCookie.ToArray().FirstOrDefault(c => c!.StartsWith(new GuardCookieOptions().Embedded + "=", StringComparison.Ordinal));
 
         DefaultHttpContext handoff = new();
         WebSessionHandler.Issue(handoff, Secret, embedded: true);
-        Assert.StartsWith(WebSessionHandler.EmbeddedCookieName + "=1;", Embedded(handoff));
+        Assert.StartsWith(new GuardCookieOptions().Embedded + "=1;", Embedded(handoff));
 
         DefaultHttpContext signIn = new();
-        signIn.Request.Headers.Cookie = $"{WebSessionHandler.EmbeddedCookieName}=1";
+        signIn.Request.Headers.Cookie = $"{new GuardCookieOptions().Embedded}=1";
         WebSessionHandler.Issue(signIn, Secret, embedded: false);
         Assert.Contains("expires=Thu, 01 Jan 1970", Embedded(signIn), StringComparison.OrdinalIgnoreCase);
 
         DefaultHttpContext slid = new();
-        slid.Request.Headers.Cookie = $"{WebSessionHandler.EmbeddedCookieName}=1";
+        slid.Request.Headers.Cookie = $"{new GuardCookieOptions().Embedded}=1";
         WebSessionHandler.Issue(slid, Secret);
-        Assert.StartsWith(WebSessionHandler.EmbeddedCookieName + "=1;", Embedded(slid));
+        Assert.StartsWith(new GuardCookieOptions().Embedded + "=1;", Embedded(slid));
         DefaultHttpContext plain = new();
         WebSessionHandler.Issue(plain, Secret);
         Assert.Null(Embedded(plain));
@@ -161,7 +161,7 @@ public class WebSessionTests
 
         if (cookie is not null)
         {
-            http.Request.Headers.Cookie = $"{WebSessionHandler.CookieName}={cookie}";
+            http.Request.Headers.Cookie = $"{new GuardCookieOptions().Session}={cookie}";
         }
 
         return http.Request;

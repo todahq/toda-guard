@@ -11,6 +11,7 @@ using OpenIddict.Server.AspNetCore;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Uow;
 using static OpenIddict.Abstractions.OpenIddictConstants;
+using Microsoft.Extensions.Options;
 
 namespace Toda.Guard.Controllers;
 
@@ -27,7 +28,8 @@ namespace Toda.Guard.Controllers;
 /// </summary>
 [ApiExplorerSettings(IgnoreApi = true)]
 [UnitOfWork(IsDisabled = true)]
-public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictTokenManager tokens, OAuthApps apps, Services.TwoFactor.SecondFactors secondFactors)
+public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictTokenManager tokens, OAuthApps apps, Services.TwoFactor.SecondFactors secondFactors,
+    IOptions<GuardOptions> options)
     : AbpControllerBase
 {
     /// <summary>Toda's grant for the second step (ADR 0082): <c>ticket</c>, <c>method</c> and <c>code</c>.</summary>
@@ -145,7 +147,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
                 : null;
             if (request.GetParameter(StepUpParameter)?.ToString() is { } password)
             {
-                if (request.ClientId != GuardOidc.WebClientId)
+                if (request.ClientId != options.Value.Clients.Web)
                 {
                     return Refuse("Only Toda's own web app can ask for a step-up.", Errors.UnauthorizedClient);
                 }

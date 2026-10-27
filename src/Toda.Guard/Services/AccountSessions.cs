@@ -5,6 +5,7 @@ using OpenIddict.Abstractions;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Entities;
 using static OpenIddict.Abstractions.OpenIddictConstants;
+using Microsoft.Extensions.Options;
 
 namespace Toda.Guard.Services;
 
@@ -33,7 +34,7 @@ public static class SessionKinds
 /// allowed (OAuth) and personal access tokens have their own lists, and signing out everywhere leaves them.
 /// </summary>
 public class AccountSessions(GuardDb guardDb, WebSessions web, IOpenIddictApplicationManager applications, IOpenIddictAuthorizationManager authorizations,
-    IOpenIddictTokenManager tokens, SecurityLog audit) : ITransientDependency
+    IOpenIddictTokenManager tokens, SecurityLog audit, IOptions<GuardOptions> options) : ITransientDependency
 {
     private const int Most = 200;
 
@@ -206,12 +207,9 @@ public class AccountSessions(GuardDb guardDb, WebSessions web, IOpenIddictApplic
     /// <summary>Phone for the app, script for toda-web; null for any other app (OAuth apps are listed apart).</summary>
     private async Task<string?> KindOfAsync(string applicationId, CancellationToken cancellationToken) =>
         await applications.FindByIdAsync(applicationId, cancellationToken) is { } app
-            ? await applications.GetClientIdAsync(app, cancellationToken) switch
-            {
-                GuardOidc.MobileClientId => SessionKinds.Phone,
-                GuardOidc.WebClientId => SessionKinds.Script,
-                _ => null,
-            }
+            ? await applications.GetClientIdAsync(app, cancellationToken) is { } clientId
+                ? clientId == options.Value.Clients.Mobile ? SessionKinds.Phone : clientId == options.Value.Clients.Web ? SessionKinds.Script : null
+                : null
             : null;
 
     /// <summary>A sign-in ends: its permission and tokens are revoked, and the web views it opened end with it.</summary>

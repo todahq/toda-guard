@@ -219,7 +219,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         }, requiresNew: true, ct, isTransactional: true);
 
         string token = Verifier.Protect(user.Id.ToString("N"), VerifyFor);
-        await SendAsync(SelfServiceMail.Verify, user, new Dictionary<string, object?> { ["link"] = $"{Site}/signup/verify#token={token}", ["hours"] = (int)VerifyFor.TotalHours }, ct);
+        await SendAsync(SelfServiceMail.Verify, user, new Dictionary<string, object?> { ["link"] = $"{Site}{options.Value.Pages.SignUpVerify}#token={token}", ["hours"] = (int)VerifyFor.TotalHours }, ct);
     }
 
     /// <summary>Confirms a sign-up's email: the account becomes active, and joins organizations by its domain. Returns its username.</summary>
@@ -332,7 +332,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         {
             string token = Resetter.Protect($"{user.Id:N}:{Stamp(user)}", ResetFor);
             await SendAsync(SelfServiceMail.Reset, user,
-                new Dictionary<string, object?> { ["username"] = user.Username, ["link"] = $"{Site}/reset-password#token={token}", ["minutes"] = (int)ResetFor.TotalMinutes }, ct,
+                new Dictionary<string, object?> { ["username"] = user.Username, ["link"] = $"{Site}{options.Value.Pages.PasswordReset}#token={token}", ["minutes"] = (int)ResetFor.TotalMinutes }, ct,
                 to: address); // the address asked for: the directory's or one the account verified (ADR 0044)
         }
     }

@@ -9,6 +9,7 @@ using Volo.Abp;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Entities;
 using static OpenIddict.Abstractions.OpenIddictConstants;
+using Microsoft.Extensions.Options;
 
 namespace Toda.Guard.Services;
 
@@ -59,7 +60,7 @@ public static class OAuthAgents
 /// for other systems, public or confidential. A person sees and revokes the apps they've allowed.
 /// </summary>
 public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenIddictAuthorizationManager authorizations, IOpenIddictTokenManager tokens,
-    ISecurityAudit audit, IGuardRateLimits limits) : ITransientDependency
+    ISecurityAudit audit, IGuardRateLimits limits, IOptions<GuardOptions> options) : ITransientDependency
 {
     private const int RegistrationsPerHour = 20;
 
@@ -115,7 +116,7 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
         // Read each list whole before asking more of the store: one query at a time on its connection.
         foreach (object app in await All(applications.ListAsync(count: 500, offset: null, cancellationToken)))
         {
-            if (await applications.GetClientIdAsync(app, cancellationToken) != GuardOidc.WebClientId)
+            if (await applications.GetClientIdAsync(app, cancellationToken) != options.Value.Clients.Web)
             {
                 apps.Add(await ToDtoAsync(app, cancellationToken));
             }
@@ -241,7 +242,7 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
     }
 
     private async Task<object> FindAsync(string clientId, CancellationToken cancellationToken) =>
-        clientId != GuardOidc.WebClientId && await applications.FindByClientIdAsync(clientId, cancellationToken) is { } app
+        clientId != options.Value.Clients.Web && await applications.FindByClientIdAsync(clientId, cancellationToken) is { } app
             ? app
             : throw new EntityNotFoundException("There's no such app.");
 

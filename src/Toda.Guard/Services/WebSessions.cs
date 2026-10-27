@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Toda.Guard.Domain;
@@ -258,15 +259,15 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "TodaSession";
-    public const string CookieName = "toda_session";
-    public const string CsrfCookieName = "toda_csrf";
     public const string CsrfHeader = "X-Toda-Csrf";
 
-    /// <summary>Set by the phone app's handoff: the shell shows only the page, and talks to the app (ADR 0073, 0075).</summary>
-    public const string EmbeddedCookieName = "toda_embedded";
+    // The cookies' names are the host's (GuardOptions.Cookies, ADR 0087): Toda's toda_session and toda_csrf; toda_embedded,
+    // set by the phone app's handoff so the shell shows only the page (ADR 0073, 0075); and the web's chosen language,
+    // NEXT_LOCALE (web/i18n/config.ts), which the server reads too (ADR 0026).
 
-    /// <summary>The web's chosen language (web/i18n/config.ts), which the server reads too (ADR 0026).</summary>
-    public const string LanguageCookieName = "NEXT_LOCALE";
+    /// <summary>The names of the session's cookies, as the host set them (Toda's by default).</summary>
+    public static GuardCookieOptions Names(HttpContext http) =>
+        http.RequestServices?.GetService<IOptions<GuardOptions>>()?.Value.Cookies ?? new GuardCookieOptions();
 
     /// <summary>The session's id (OpenID Connect's claim), so the person's list can say which session is this one.</summary>
     public const string SessionIdClaim = "sid";
@@ -274,11 +275,11 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
     private const string CsrfFailedItem = "toda.csrf-failed";
 
     /// <summary>Whether a request comes with a session cookie (and so goes to this handler, when it has no bearer token).</summary>
-    public static bool Carries(HttpRequest request) => request.Cookies.ContainsKey(CookieName);
+    public static bool Carries(HttpRequest request) => request.Cookies.ContainsKey(Names(request.HttpContext).Session);
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (Request.Cookies[CookieName] is not { Length: > 0 } secret)
+        if (Request.Cookies[Names(Context).Session] is not { Length: > 0 } secret)
         {
             return AuthenticateResult.NoResult();
         }
@@ -321,7 +322,7 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
             return header;
         }
 
-        return Request.HasFormContentType ? (await Request.ReadFormAsync(Context.RequestAborted))[CsrfCookieName].ToString() : null;
+        return Request.HasFormContentType ? (await Request.ReadFormAsync(Context.RequestAborted))[Names(Context).Csrf].ToString() : null;
     }
 
     protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
@@ -344,31 +345,33 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
     public static void Issue(HttpContext http, string secret, bool? embedded = null)
     {
         bool secure = IsHttps(http.Request);
+        GuardCookieOptions names = Names(http);
         CookieOptions Cookie(bool httpOnly) => new()
         {
             HttpOnly = httpOnly, Secure = secure, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = WebSessions.Lifetime, IsEssential = true,
         };
-        http.Response.Cookies.Append(CookieName, secret, Cookie(httpOnly: true));
-        http.Response.Cookies.Append(CsrfCookieName, WebSessions.CsrfFor(secret), Cookie(httpOnly: false));
-        if (embedded ?? http.Request.Cookies.ContainsKey(EmbeddedCookieName))
+        http.Response.Cookies.Append(names.Session, secret, Cookie(httpOnly: true));
+        http.Response.Cookies.Append(names.Csrf, WebSessions.CsrfFor(secret), Cookie(httpOnly: false));
+        if (embedded ?? http.Request.Cookies.ContainsKey(names.Embedded))
         {
-            http.Response.Cookies.Append(EmbeddedCookieName, "1", Cookie(httpOnly: false));
+            http.Response.Cookies.Append(names.Embedded, "1", Cookie(httpOnly: false));
         }
         else if (embedded is false)
         {
-            http.Response.Cookies.Delete(EmbeddedCookieName, new CookieOptions { Secure = secure, SameSite = SameSiteMode.Lax, Path = "/" });
+            http.Response.Cookies.Delete(names.Embedded, new CookieOptions { Secure = secure, SameSite = SameSiteMode.Lax, Path = "/" });
         }
     }
 
     /// <summary>The language the shell shows in, as its language switcher would set it; for as long as the browser stays open.</summary>
     public static void IssueLanguage(HttpContext http, string language) =>
-        http.Response.Cookies.Append(LanguageCookieName, language,
+        http.Response.Cookies.Append(Names(http).Language, language,
             new CookieOptions { Secure = IsHttps(http.Request), SameSite = SameSiteMode.Lax, Path = "/", IsEssential = true });
 
     public static void Clear(HttpContext http)
     {
         bool secure = IsHttps(http.Request);
-        foreach (string name in new[] { CookieName, CsrfCookieName, EmbeddedCookieName })
+        GuardCookieOptions names = Names(http);
+        foreach (string name in new[] { names.Session, names.Csrf, names.Embedded })
         {
             http.Response.Cookies.Delete(name, new CookieOptions { Secure = secure, SameSite = SameSiteMode.Lax, Path = "/" });
         }

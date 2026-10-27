@@ -263,7 +263,7 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
     /// <summary>A session this browser had before ends: one browser, one session.</summary>
     private async Task EndPreviousAsync(CancellationToken cancellationToken)
     {
-        if (Request.Cookies[WebSessionHandler.CookieName] is { Length: > 0 } before && await sessions.FindAsync(before, cancellationToken) is { } previous)
+        if (Request.Cookies[WebSessionHandler.Names(HttpContext).Session] is { Length: > 0 } before && await sessions.FindAsync(before, cancellationToken) is { } previous)
         {
             await sessions.EndAsync(previous.Info.Id, "signed-out", cancellationToken);
         }

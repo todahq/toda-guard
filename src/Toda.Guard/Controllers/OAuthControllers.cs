@@ -15,6 +15,7 @@ using OpenIddict.Server.AspNetCore;
 using Volo.Abp;
 using Volo.Abp.Uow;
 using static OpenIddict.Abstractions.OpenIddictConstants;
+using Microsoft.Extensions.Options;
 
 namespace Toda.Guard.Controllers;
 
@@ -28,7 +29,7 @@ namespace Toda.Guard.Controllers;
 [ApiExplorerSettings(IgnoreApi = true)]
 [UnitOfWork(IsDisabled = true)]
 [GuardFeature(nameof(GuardFeatures.OAuthApps))]
-public class AuthorizationController(OAuthApps apps, GuardDb guardDb) : GuardControllerBase
+public class AuthorizationController(OAuthApps apps, GuardDb guardDb, IOptions<GuardOptions> options) : GuardControllerBase
 {
     public const string DecisionParameter = "decision";
     public const string AccessParameter = "access";
@@ -47,7 +48,7 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb) : GuardCon
         OpenIddictRequest request = HttpContext.GetOpenIddictServerRequest()
             ?? throw new InvalidOperationException("The OpenIddict server request cannot be retrieved.");
         string query = QueryString.Create(request.GetParameters()
-            .Where(p => p.Key is not (DecisionParameter or AccessParameter or WebSessionHandler.CsrfCookieName))
+            .Where(p => p.Key != DecisionParameter && p.Key != AccessParameter && p.Key != WebSessionHandler.Names(HttpContext).Csrf)
             .Select(p => new KeyValuePair<string, string?>(p.Key, p.Value.ToString()))).ToUriComponent();
 
         if (Acting.SubjectId is not { } accountId)
@@ -74,7 +75,7 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb) : GuardCon
         {
             return request.HasPromptValue(PromptValues.None)
                 ? Refuse(Errors.ConsentRequired, "The person hasn't allowed this app yet.")
-                : Redirect("/oauth/consent" + query);
+                : Redirect(options.Value.Pages.Consent + query);
         }
 
         if (decision != "allow")
