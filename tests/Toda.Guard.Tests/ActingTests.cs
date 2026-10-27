@@ -138,9 +138,10 @@ public partial class ActingTests
     public void Only_the_acting_context_reads_who_the_token_is_for()
     {
         string root = AppContext.BaseDirectory;
-        while (!File.Exists(Path.Combine(root, "Toda.slnx")))
+        // The repository's root: Toda's, or Guard's own (ADR 0087).
+        while (!File.Exists(Path.Combine(root, "Toda.slnx")) && !File.Exists(Path.Combine(root, "Toda.Guard.slnx")))
         {
-            root = Path.GetDirectoryName(root) ?? throw new InvalidOperationException("Toda.slnx not found above the test folder.");
+            root = Path.GetDirectoryName(root) ?? throw new InvalidOperationException("Toda.slnx or Toda.Guard.slnx not found above the test folder.");
         }
 
         string allowed = Path.Combine("src", "Toda.Guard.Acting", "ActingContext.cs");

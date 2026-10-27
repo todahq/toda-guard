@@ -12,11 +12,13 @@ namespace Toda.Guard.Host.Tests;
 /// (ConnectionStrings:Guard), with Guard's defaults only. An admin opens sign-up, a person signs up, confirms the mailed
 /// link from the pickup folder, signs in and reads /api/guard/me; a refused input is 400 and a switched-off feature 404;
 /// a refusal is JSON whatever the client accepts.
-/// Needs Postgres on localhost:55432 (toda/toda), as CI's.
+/// Needs Postgres: localhost:55432 (toda/toda) as toda's CI has, or the server GUARD_TEST_POSTGRES names.
 /// </summary>
 public sealed partial class GuardAloneTests : IAsyncLifetime
 {
-    private const string Server = "Host=localhost;Port=55432;Username=toda;Password=toda";
+    /// <summary>The Postgres server the test makes its database on: GUARD_TEST_POSTGRES, else CI's local one.</summary>
+    private static readonly string Server =
+        Environment.GetEnvironmentVariable("GUARD_TEST_POSTGRES") is { Length: > 0 } server ? server : "Host=localhost;Port=55432;Username=toda;Password=toda";
     private const string AdminPassword = "Host-Admin-Pass-1";
 
     private readonly string _database = "guard_host_" + Guid.NewGuid().ToString("N")[..12];
