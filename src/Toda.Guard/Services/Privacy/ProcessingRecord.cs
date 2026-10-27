@@ -35,7 +35,9 @@ public sealed record ProcessingRecordTexts
     public required string Kinds { get; init; }
     public required string LegalBasis { get; init; }
     public required string Recipients { get; init; }
-    public required string OutsideKingdom { get; init; }
+    public required string OutsideCountry { get; init; }
+    public required string SiteCountry { get; init; }
+    public required string Service { get; init; }
     public required string Kept { get; init; }
     public required string Sensitive { get; init; }
     public required string Notes { get; init; }
@@ -77,7 +79,9 @@ public sealed record ProcessingRecordTexts
         Kinds = "Personal data",
         LegalBasis = "Legal basis",
         Recipients = "Who receives it",
-        OutsideKingdom = "Outside the Kingdom",
+        OutsideCountry = "Outside the site's country",
+        SiteCountry = "The site's country",
+        Service = "the service {0}",
         Kept = "Kept today",
         Sensitive = "May hold sensitive data",
         Notes = "Notes",
@@ -136,7 +140,9 @@ public sealed record ProcessingRecordTexts
         Kinds = "البيانات الشخصية",
         LegalBasis = "الأساس النظامي",
         Recipients = "من يتلقاها",
-        OutsideKingdom = "خارج المملكة",
+        OutsideCountry = "خارج بلد الموقع",
+        SiteCountry = "بلد الموقع",
+        Service = "الخدمة {0}",
         Kept = "مدة الحفظ حاليًا",
         Sensitive = "قد يحوي بيانات حساسة",
         Notes = "ملاحظات",
@@ -181,8 +187,9 @@ public sealed record ProcessingRecordTexts
 
 /// <summary>
 /// The record of processing (ADR 0082, step 2b), what PDPL asks a controller to keep: the controller and the officer;
-/// each store as a processing activity with its purpose, whom it's about, its kinds of data, legal basis, recipients,
-/// whether it leaves the Kingdom, how long it's kept and whether it may hold sensitive data; then the gaps.
+/// the site's country; each store as a processing activity with its purpose, whom it's about, its kinds of data, legal
+/// basis, recipients, whether it leaves the site's country, how long it's kept and whether it may hold sensitive data;
+/// then the gaps.
 /// </summary>
 public static class ProcessingRecord
 {
@@ -200,6 +207,7 @@ public static class ProcessingRecord
                 .Append("- ").Append(t.Contact).Append(": ").Append(Line(who.Contact) ?? t.NotRecorded).Append("\n\n");
         }
 
+        md.Append("## ").Append(t.SiteCountry).Append("\n\n").Append(Line(map.Settings.Country) ?? t.NotRecorded).Append("\n\n");
         md.Append("## ").Append(t.Activities).Append('\n');
         foreach (Row row in Rows(map, t, language))
         {
@@ -233,7 +241,7 @@ public static class ProcessingRecord
     public static string ToCsv(PrivacyMapDto map, ProcessingRecordTexts t, string language)
     {
         StringBuilder csv = new("﻿");
-        csv.AppendJoin(',', new[] { "key", t.Store, t.Owner, t.Purpose, t.About, t.Kinds, t.LegalBasis, t.Recipients, t.OutsideKingdom, t.Kept, t.Sensitive, t.Notes }.Select(Cell))
+        csv.AppendJoin(',', new[] { "key", t.Store, t.Owner, t.Purpose, t.About, t.Kinds, t.LegalBasis, t.Recipients, t.OutsideCountry, t.Kept, t.Sensitive, t.Notes }.Select(Cell))
             .Append("\r\n");
         foreach (Row row in Rows(map, t, language))
         {
@@ -249,7 +257,7 @@ public static class ProcessingRecord
         public IEnumerable<(string Label, string Value)> Fields(ProcessingRecordTexts t) =>
         [
             (t.Owner, Owner), (t.Purpose, Purpose), (t.About, About), (t.Kinds, Kinds), (t.LegalBasis, LegalBasis), (t.Recipients, Recipients),
-            (t.OutsideKingdom, Outside), (t.Kept, Kept), (t.Sensitive, Sensitive), (t.Notes, Notes),
+            (t.OutsideCountry, Outside), (t.Kept, Kept), (t.Sensitive, Sensitive), (t.Notes, Notes),
         ];
     }
 
@@ -265,12 +273,14 @@ public static class ProcessingRecord
             List<string> outside = [];
             foreach (string destination in s.GoesTo)
             {
-                string name = t.DestinationNames.GetValueOrDefault(destination, destination);
+                string name = PersonalDataDestinations.IsService(destination)
+                    ? string.Format(CultureInfo.InvariantCulture, t.Service, destination[PersonalDataDestinations.ServicePrefix.Length..])
+                    : t.DestinationNames.GetValueOrDefault(destination, destination);
                 if (map.Settings.Destinations.TryGetValue(destination, out PrivacyDestination? where))
                 {
                     string detail = string.Join(", ", new[] { where.Recipient, where.Country }.Where(x => !string.IsNullOrWhiteSpace(x)));
                     recipients.Add(detail.Length > 0 ? $"{name}: {detail}" : name);
-                    if (where.OutsideKingdom)
+                    if (where.OutsideCountry)
                     {
                         outside.Add(string.IsNullOrWhiteSpace(where.Country) ? name : $"{name} ({where.Country})");
                     }

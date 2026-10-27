@@ -25,7 +25,7 @@ public class PersonalDataExportTests
             [PersonalDataKinds.Content], PersonalDataKept.Forever, [], true, null);
 
     private static PrivacyMapDto Map(params PrivacyStoreDto[] stores) => new(
-        stores, [], new PrivacySettingsDto(new PrivacyContactDto(null, null), new PrivacyContactDto(null, null), new Dictionary<string, PrivacyDestination>(), null, null),
+        stores, [], new PrivacySettingsDto(new PrivacyContactDto(null, null), new PrivacyContactDto(null, null), null, new Dictionary<string, PrivacyDestination>(), null, null),
         [], PersonalDataKinds.All, PersonalDataDestinations.All, LegalBases.All);
 
     private static readonly PrivacyMapDto Site = Map(

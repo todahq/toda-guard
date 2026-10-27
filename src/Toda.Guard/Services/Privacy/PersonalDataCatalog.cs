@@ -34,8 +34,8 @@ public sealed record PrivacyPersonDto(Guid Id, string Name);
 public sealed record PrivacyContactDto(string? Name, string? Contact);
 
 /// <summary>The site's controller and data protection officer, and who receives each destination's data.</summary>
-public sealed record PrivacySettingsDto(PrivacyContactDto Controller, PrivacyContactDto Officer, IReadOnlyDictionary<string, PrivacyDestination> Destinations,
-    DateTime? UpdatedAt, PrivacyPersonDto? UpdatedBy);
+public sealed record PrivacySettingsDto(PrivacyContactDto Controller, PrivacyContactDto Officer, string? Country,
+    IReadOnlyDictionary<string, PrivacyDestination> Destinations, DateTime? UpdatedAt, PrivacyPersonDto? UpdatedBy);
 
 /// <summary>
 /// A site's data map (ADR 0082, step 2b): every store of its modules and plugins with what's recorded, every plugin with
@@ -95,7 +95,7 @@ public sealed class PersonalDataCatalog(IEnumerable<IPersonalDataDeclarations> m
 
     public static PrivacySettingsDto Settings(PrivacySettings? settings, IReadOnlyDictionary<Guid, string> names) =>
         new(new PrivacyContactDto(settings?.ControllerName, settings?.ControllerContact), new PrivacyContactDto(settings?.OfficerName, settings?.OfficerContact),
-            settings?.Destinations ?? [], settings?.UpdatedAt, Person(settings?.UpdatedBy, names));
+            settings?.Country, settings?.Destinations ?? [], settings?.UpdatedAt, Person(settings?.UpdatedBy, names));
 
     private static PrivacyPersonDto? Person(Guid? id, IReadOnlyDictionary<Guid, string> names) =>
         id is { } known ? new PrivacyPersonDto(known, names.GetValueOrDefault(known, "")) : null;

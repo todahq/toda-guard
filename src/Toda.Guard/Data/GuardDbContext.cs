@@ -320,6 +320,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.Property(x => x.ControllerContact).HasMaxLength(500);
             b.Property(x => x.OfficerName).HasMaxLength(200);
             b.Property(x => x.OfficerContact).HasMaxLength(500);
+            b.Property(x => x.Country).HasMaxLength(200);
             System.Text.Json.JsonSerializerOptions json = new(System.Text.Json.JsonSerializerDefaults.Web);
             b.Property(x => x.Destinations).HasColumnType("jsonb").HasConversion(
                 v => System.Text.Json.JsonSerializer.Serialize(v, json),

@@ -37,12 +37,13 @@ public class PrivacyStoreRecord
     public Guid? UpdatedBy { get; set; }
 }
 
-/// <summary>Who receives a destination's data, in which country, and whether that's outside the Kingdom.</summary>
-public sealed record PrivacyDestination(string? Recipient, string? Country, bool OutsideKingdom);
+/// <summary>Who receives a destination's data, in which country, and whether that's outside the site's country.</summary>
+public sealed record PrivacyDestination(string? Recipient, string? Country, bool OutsideCountry);
 
 /// <summary>
 /// The site's part of its record of processing (one row): the controller and the data protection officer, each a name and
-/// a contact, and who receives each destination's data (ADR 0082, step 2b; step 7's notice uses them too).
+/// a contact, the site's country, and who receives each destination's data (ADR 0082, step 2b; step 7's notice uses them
+/// too). Toda is for sites anywhere: "outside" is outside the country set here.
 /// </summary>
 public class PrivacySettings
 {
@@ -54,7 +55,10 @@ public class PrivacySettings
     public string? OfficerName { get; set; }
     public string? OfficerContact { get; set; }
 
-    /// <summary>By destination (<see cref="PersonalDataDestinations"/>): <c>mail</c>, <c>ai</c>, …</summary>
+    /// <summary>The country the site's data is to stay in, as the law it's under sees it; data going elsewhere leaves it.</summary>
+    public string? Country { get; set; }
+
+    /// <summary>By destination (<see cref="PersonalDataDestinations"/>): <c>mail</c>, <c>ai</c>, …, or a plugin's <c>service:{name}</c>.</summary>
     public Dictionary<string, PrivacyDestination> Destinations { get; set; } = [];
 
     public DateTime UpdatedAt { get; set; }

@@ -14,7 +14,7 @@ namespace Toda.Guard.Controllers;
 
 public sealed record PrivacyStoreInput(string? LegalBasis, bool? Sensitive, string? Notes);
 
-public sealed record PrivacySettingsInput(PrivacyContactDto? Controller, PrivacyContactDto? Officer, Dictionary<string, PrivacyDestination>? Destinations);
+public sealed record PrivacySettingsInput(PrivacyContactDto? Controller, PrivacyContactDto? Officer, string? Country, Dictionary<string, PrivacyDestination>? Destinations);
 
 /// <summary>
 /// Administration › Privacy (ADR 0082, PDPL step 2b): the site's data map, what admins record for it (each store's legal
@@ -86,15 +86,17 @@ public class PrivacyController(PersonalDataCatalog catalog, IPluginPersonalDataS
     {
         PrivacyContactDto controller = Contact(input.Controller, "controller");
         PrivacyContactDto officer = Contact(input.Officer, "data protection officer");
+        string? country = Text(input.Country, NameLength, "The site's country");
         Dictionary<string, PrivacyDestination> destinations = [];
         foreach ((string key, PrivacyDestination where) in input.Destinations ?? [])
         {
-            if (!PersonalDataDestinations.All.Contains(key))
+            // Toda's destinations, or a service a plugin calls (service:{name}, as its manifest names it).
+            if (!PersonalDataDestinations.IsKnown(key))
             {
-                throw new UserFriendlyException($"'{key}' isn't a destination; they're {string.Join(", ", PersonalDataDestinations.All)}.");
+                throw new UserFriendlyException($"'{key}' isn't a destination; they're {string.Join(", ", PersonalDataDestinations.All)}, or service:{{name}}.");
             }
 
-            destinations[key] = new PrivacyDestination(Text(where.Recipient, NameLength, "A recipient"), Text(where.Country, NameLength, "A country"), where.OutsideKingdom);
+            destinations[key] = new PrivacyDestination(Text(where.Recipient, NameLength, "A recipient"), Text(where.Country, NameLength, "A country"), where.OutsideCountry);
         }
 
         Guid me = CurrentAccountId;
@@ -110,9 +112,11 @@ public class PrivacyController(PersonalDataCatalog catalog, IPluginPersonalDataS
             {
                 controller = settings.ControllerName != controller.Name || settings.ControllerContact != controller.Contact,
                 officer = settings.OfficerName != officer.Name || settings.OfficerContact != officer.Contact,
+                country = new { before = settings.Country, after = country },
                 destinations = destinations.Keys.Order(StringComparer.Ordinal),
             });
             (settings.ControllerName, settings.ControllerContact, settings.OfficerName, settings.OfficerContact) = (controller.Name, controller.Contact, officer.Name, officer.Contact);
+            settings.Country = country;
             (settings.Destinations, settings.UpdatedAt, settings.UpdatedBy) = (destinations, DateTime.UtcNow, me);
             await db.SaveChangesAsync(cancellationToken);
             Dictionary<Guid, string> names = await db.Accounts.Where(a => a.Id == me).ToDictionaryAsync(a => a.Id, a => a.DisplayName, cancellationToken);

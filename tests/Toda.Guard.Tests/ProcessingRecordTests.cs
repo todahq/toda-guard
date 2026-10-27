@@ -22,7 +22,7 @@ public class ProcessingRecordTests
     private static PrivacyMapDto Map(params InstalledPlugin[] plugins) => new(
         [Comments, Contacts],
         plugins,
-        new PrivacySettingsDto(new PrivacyContactDto("Acme Co.", "privacy@acme.example"), new PrivacyContactDto(null, null),
+        new PrivacySettingsDto(new PrivacyContactDto("Acme Co.", "privacy@acme.example"), new PrivacyContactDto(null, null), "Saudi Arabia",
             new Dictionary<string, PrivacyDestination> { ["mail"] = new("Mail Corp", "Saudi Arabia", false), ["ai"] = new("Model Inc.", "Ireland", true) },
             null, null),
         [], PersonalDataKinds.All, PersonalDataDestinations.All, LegalBases.All);
@@ -43,7 +43,8 @@ public class ProcessingRecordTests
         Assert.Contains("### Name of projects.comments (`projects.comments`)", md);
         Assert.Contains("- Legal basis: an agreement with the person", md);
         Assert.Contains("- Who receives it: the mail server: Mail Corp, Saudi Arabia; AI providers: Model Inc., Ireland", md);
-        Assert.Contains("- Outside the Kingdom: yes: AI providers (Ireland)", md);
+        Assert.Contains("## The site's country\n\nSaudi Arabia\n", md);
+        Assert.Contains("- Outside the site's country: yes: AI providers (Ireland)", md);
         Assert.Contains("- Kept today: 180 days by default (Toda:Mail:KeepDays)", md);
         Assert.Contains("- May hold sensitive data: yes", md);
         Assert.Contains("- Kept by: CRM", md);
@@ -72,6 +73,22 @@ public class ProcessingRecordTests
         Assert.Contains("### اسم projects.comments (`projects.comments`)", md);
         Assert.Contains("- الأساس النظامي: اتفاق مع صاحب البيانات", md);
         Assert.Contains("- مدة الحفظ حاليًا: 180 يومًا افتراضيًا (Toda:Mail:KeepDays)", md);
+    }
+
+    [Fact]
+    public void A_service_a_plugin_calls_is_named_and_may_be_outside_the_country()
+    {
+        PrivacyMapDto map = Map();
+        map = map with
+        {
+            Stores = [Store("pay.payments", "pay", PrivacyStoreDto.Plugin, ["service:card-gateway"], null)],
+            Settings = map.Settings with { Destinations = new Dictionary<string, PrivacyDestination> { ["service:card-gateway"] = new("Pay Co.", "Bahrain", true) } },
+        };
+
+        string md = ProcessingRecord.ToMarkdown(map, ProcessingRecordTexts.English, "en", DateTime.UtcNow);
+        Assert.Contains("- Who receives it: the service card-gateway: Pay Co., Bahrain", md);
+        Assert.Contains("- Outside the site's country: yes: the service card-gateway (Bahrain)", md);
+        Assert.Contains("الخدمة card-gateway", ProcessingRecord.ToMarkdown(map, ProcessingRecordTexts.Arabic, "ar", DateTime.UtcNow));
     }
 
     [Fact]
