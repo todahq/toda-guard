@@ -129,15 +129,15 @@ public class PrivacyController(PersonalDataCatalog catalog, IPluginPersonalDataS
     public async Task<IActionResult> Record([FromQuery] string format = ProcessingRecord.Markdown, [FromQuery] string language = "en",
         CancellationToken cancellationToken = default)
     {
-        // A file's action answers its refusals itself: an exception here would reach a browser's download as a server error.
+        // A refusal is JSON with its status whatever the download's fetch accepts ([GuardErrors] on every Guard controller).
         if (format is not (ProcessingRecord.Markdown or ProcessingRecord.Csv))
         {
-            return SessionController.Error(400, "bad_format", "The record comes as markdown or csv.");
+            throw new UserFriendlyException("The record comes as markdown or csv.", "bad_format");
         }
 
         if (!options.Value.RecordTexts.TryGetValue(language, out ProcessingRecordTexts? texts))
         {
-            return SessionController.Error(400, "bad_language", $"The record comes in {string.Join(", ", options.Value.RecordTexts.Keys)}.");
+            throw new UserFriendlyException($"The record comes in {string.Join(", ", options.Value.RecordTexts.Keys)}.", "bad_language");
         }
 
         PrivacyMapDto map = await catalog.MapAsync(cancellationToken);

@@ -14,6 +14,7 @@ namespace Toda.Guard.Controllers;
 /// </summary>
 [UnitOfWork(IsDisabled = true)]
 [ApiExplorerSettings(IgnoreApi = false)] // visible in /openapi/v1.json (ABP hides non-remote-service controllers otherwise)
+[GuardErrors] // a refusal answers with its JSON error whatever the client accepts (a download's fetch sends */*)
 public abstract class GuardControllerBase : AbpControllerBase
 {
     /// <summary>Whose rights the request uses and who is acting (ADR 0042).</summary>

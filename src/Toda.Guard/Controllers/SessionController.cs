@@ -223,6 +223,7 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
     [HttpGet("handoff")]
     [GuardFeature(nameof(GuardFeatures.Handoff))]
     [AllowAnonymous]
+    [AnswersItsOwnErrors] // a web view follows redirects: a refused handoff goes to sign-in, never to a JSON error
     public async Task<IActionResult> TakeHandoff([FromQuery] string? code, [FromQuery] string? next, [FromQuery] string? lang,
         CancellationToken cancellationToken)
     {
