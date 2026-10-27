@@ -8,7 +8,6 @@ using Microsoft.EntityFrameworkCore;
 using Casl;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
-using Toda.Platform.Controllers;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities;
 
@@ -16,7 +15,7 @@ namespace Toda.Guard.Controllers;
 
 /// <summary>Roles hold rules in CASL's format; grants give a role to an account or a group, with a scope.</summary>
 [Route("api/guard/roles")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize(Policy = GuardPolicies.Admin)]
 public class RolesController(GuardDb guardDb, RoleCatalog roleCatalog, SecurityLog audit) : GuardControllerBase
 {
     public sealed record GrantDto(Guid Id, string PrincipalType, Guid PrincipalId, string PrincipalName, JsonNode? Scope, DateTime? ValidUntil, DateTime CreatedAt);

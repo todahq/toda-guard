@@ -8,14 +8,13 @@ using Toda.Guard.Directories;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
 using Toda.Platform.Acting;
-using Toda.Platform.Controllers;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities;
 
 namespace Toda.Guard.Controllers;
 
 [Route("api/guard")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize(Policy = GuardPolicies.Admin)]
 public class DirectoriesController(
     GuardDb guardDb,
     ConnectorCatalog connectors,

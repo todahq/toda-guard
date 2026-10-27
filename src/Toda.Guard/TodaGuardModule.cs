@@ -15,7 +15,6 @@ using Toda.Guard.Domain;
 using Toda.Guard.Directories;
 using Toda.Guard.Services;
 using Toda.Platform;
-using Toda.Platform.Controllers;
 using Toda.Platform.Plugins;
 using Volo.Abp.EntityFrameworkCore;
 using Volo.Abp.EntityFrameworkCore.DistributedEvents;
@@ -160,7 +159,7 @@ public class TodaGuardModule : AbpModule
         Configure<Volo.Abp.AspNetCore.Mvc.AntiForgery.AbpAntiForgeryOptions>(options => options.AutoValidate = false);
 
         context.Services.AddAuthorizationBuilder()
-            .AddPolicy(TodaPolicies.Admin, policy => policy.RequireAuthenticatedUser().AddRequirements(new TodaAdminRequirement()));
+            .AddPolicy(GuardPolicies.Admin, policy => policy.RequireAuthenticatedUser().AddRequirements(new TodaAdminRequirement()));
         context.Services.AddTransient<IAuthorizationHandler, TodaAdminHandler>();
 
         context.Services.AddHostedService<DirectorySyncScheduler>();

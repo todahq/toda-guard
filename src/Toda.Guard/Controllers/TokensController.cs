@@ -4,7 +4,6 @@ using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
 using Toda.Platform.Acting;
-using Toda.Platform.Controllers;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities;
 
@@ -45,7 +44,7 @@ public sealed record TokenLimitsDto(int MaxDays);
 
 /// <summary>Every live token on the site, for site admins, who may revoke any.</summary>
 [Route("api/guard/tokens")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize(Policy = GuardPolicies.Admin)]
 public class TokensController(PersonalTokens tokens) : GuardControllerBase
 {
     [HttpGet]
@@ -71,7 +70,7 @@ public sealed record CreateServiceAccountInput(string Username, string? DisplayN
 /// webhooks and agents act as them.
 /// </summary>
 [Route("api/guard/service-accounts")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize(Policy = GuardPolicies.Admin)]
 public class ServiceAccountsController(GuardDb guardDb, AccountProjector projector, PersonalTokens tokens, SecurityLog audit) : GuardControllerBase
 {
     [HttpGet]

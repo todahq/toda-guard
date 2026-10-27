@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
 using Toda.Platform.Acting;
-using Toda.Platform.Controllers;
 using Volo.Abp.Domain.Entities;
 
 namespace Toda.Guard.Controllers;
@@ -16,7 +15,7 @@ public sealed record AnonymousGrantDto(Guid Id, string RoleKey, string RoleName,
 /// it's given, anyone on the internet gets. Grants are made in a project's members; any can be revoked here.
 /// </summary>
 [Route("api/guard/anonymous")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize(Policy = GuardPolicies.Admin)]
 public class AnonymousController(RoleCatalog roles, IEnumerable<IGrantScopeDescriber> describers) : GuardControllerBase
 {
     [HttpGet]

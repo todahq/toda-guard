@@ -369,7 +369,7 @@ public class MyEmailsController(AccountEmailService emails, SelfServiceLimiter l
     {
         if (!await limiter.AllowAsync(action, HttpContext.Connection.RemoteIpAddress?.ToString(), email, cancellationToken))
         {
-            throw new UserFriendlyException("Too many tries. Wait a while and try again.", Toda.Platform.TodaErrorCodes.TooManyRequests);
+            throw new UserFriendlyException("Too many tries. Wait a while and try again.", GuardErrorCodes.TooManyRequests);
         }
     }
 }

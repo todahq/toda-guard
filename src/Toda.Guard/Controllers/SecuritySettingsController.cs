@@ -6,7 +6,6 @@ using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
 using Toda.Platform.Acting;
-using Toda.Platform.Controllers;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
 
@@ -28,7 +27,7 @@ public sealed record SecuritySettingsInput([property: JsonRequired] int Retentio
 /// window weakens step-up), so it needs a step-up itself and goes in the audit.
 /// </summary>
 [Route("api/guard/security/settings")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize(Policy = GuardPolicies.Admin)]
 public class SecuritySettingsController(GuardDb guardDb, SecurityLog audit) : GuardControllerBase
 {
     [HttpGet]
@@ -126,7 +125,7 @@ public sealed record SecondFactorSettingsInput(List<string>? Methods);
 /// authenticator app. A group set to strong still asks for the app. Changing it needs a step-up and is audited.
 /// </summary>
 [Route("api/guard/security/second-factor")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize(Policy = GuardPolicies.Admin)]
 public class SecondFactorSettingsController(GuardDb guardDb, SecurityLog audit, IGuardMessenger messenger) : GuardControllerBase
 {
     [HttpGet]

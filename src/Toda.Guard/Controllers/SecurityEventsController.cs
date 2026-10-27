@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
-using Toda.Platform.Controllers;
 using Volo.Abp;
 
 namespace Toda.Guard.Controllers;
@@ -27,7 +26,7 @@ public sealed record SecurityEventPageDto(long Total, List<SecurityEventDto> Ite
 /// setting (<see cref="SecuritySettingsController"/>) decides how long they're kept.
 /// </summary>
 [Route("api/guard/security-events")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize(Policy = GuardPolicies.Admin)]
 public class SecurityEventsController(GuardDb guardDb, IEnumerable<IGrantScopeDescriber> describers) : GuardControllerBase
 {
     /// <summary>

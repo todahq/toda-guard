@@ -1,4 +1,3 @@
-using Toda.Platform;
 using Toda.Platform.Acting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,7 +46,7 @@ public abstract class GuardControllerBase : AbpControllerBase
         catch (Casl.ForbiddenException ex)
         {
             // UserFriendlyException keeps the reason in the 403 body; ABP answers its authorization exception with an empty Forbid.
-            throw new Volo.Abp.UserFriendlyException(ex.Message, TodaErrorCodes.Forbidden);
+            throw new Volo.Abp.UserFriendlyException(ex.Message, GuardErrorCodes.Forbidden);
         }
     }
 
@@ -56,7 +55,7 @@ public abstract class GuardControllerBase : AbpControllerBase
     {
         if (!ability.Can(action, subject))
         {
-            throw new Volo.Abp.UserFriendlyException($"You can't {action} {subject} records.", TodaErrorCodes.Forbidden);
+            throw new Volo.Abp.UserFriendlyException($"You can't {action} {subject} records.", GuardErrorCodes.Forbidden);
         }
     }
 

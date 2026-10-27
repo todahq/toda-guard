@@ -2,8 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Toda.Guard.Services;
 using Toda.Platform.Acting;
-using Toda.Platform;
-using Toda.Platform.Controllers;
 using Volo.Abp;
 
 namespace Toda.Guard.Controllers;
@@ -76,14 +74,14 @@ public class SelfServiceController(SelfService self, SelfServiceLimiter limiter,
     {
         if (!await limiter.AllowAsync(action, HttpContext.Connection.RemoteIpAddress?.ToString(), email, cancellationToken))
         {
-            throw new UserFriendlyException("Too many tries. Wait a while and try again.", TodaErrorCodes.TooManyRequests);
+            throw new UserFriendlyException("Too many tries. Wait a while and try again.", GuardErrorCodes.TooManyRequests);
         }
     }
 }
 
 /// <summary>Sign-up as site admins set it (ADR 0037): on or off, the internal directory accounts go to, and the email domains it takes.</summary>
 [Route("api/guard/signup/settings")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize(Policy = GuardPolicies.Admin)]
 public class SignUpSettingsController(SelfService self) : GuardControllerBase
 {
     [HttpGet]

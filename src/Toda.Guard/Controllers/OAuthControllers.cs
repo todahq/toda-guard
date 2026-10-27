@@ -10,7 +10,6 @@ using Microsoft.Extensions.Configuration;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
 using Toda.Platform.Acting;
-using Toda.Platform.Controllers;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using Volo.Abp;
@@ -168,16 +167,16 @@ public class ClientRegistrationController(OAuthApps apps, IConfiguration configu
 public class OAuthAppsController(OAuthApps apps) : GuardControllerBase
 {
     [HttpGet("oauth/apps")]
-    [Authorize(Policy = TodaPolicies.Admin)]
+    [Authorize(Policy = GuardPolicies.Admin)]
     public Task<List<OAuthAppDto>> List(CancellationToken cancellationToken) => apps.ListAsync(cancellationToken);
 
     [HttpPost("oauth/apps")]
-    [Authorize(Policy = TodaPolicies.Admin)]
+    [Authorize(Policy = GuardPolicies.Admin)]
     [StepUp]
     public Task<NewOAuthAppDto> Create([FromBody] CreateOAuthAppInput input, CancellationToken cancellationToken) => apps.CreateAsync(input, cancellationToken);
 
     [HttpDelete("oauth/apps/{clientId}")]
-    [Authorize(Policy = TodaPolicies.Admin)]
+    [Authorize(Policy = GuardPolicies.Admin)]
     public async Task<NoContentResult> Delete(string clientId, CancellationToken cancellationToken)
     {
         await apps.DeleteAsync(clientId, cancellationToken);

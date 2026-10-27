@@ -8,7 +8,6 @@ using Toda.Guard.Domain;
 using Toda.Guard.Services;
 using Toda.Guard.Services.Privacy;
 using Toda.Platform.Acting;
-using Toda.Platform.Controllers;
 using Volo.Abp;
 
 namespace Toda.Guard.Controllers;
@@ -24,7 +23,7 @@ public sealed record PrivacySettingsInput(PrivacyContactDto? Controller, Privacy
 /// as the record's downloads do.
 /// </summary>
 [Route("api/guard/privacy")]
-[Authorize(Policy = TodaPolicies.Admin)]
+[Authorize(Policy = GuardPolicies.Admin)]
 public class PrivacyController(PersonalDataCatalog catalog, IPluginPersonalDataSource plugins, GuardDb guardDb, SecurityLog audit, IOptions<GuardPrivacyOptions> options)
     : GuardControllerBase
 {
