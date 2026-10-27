@@ -118,7 +118,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
         if (request.IsRefreshTokenGrantType())
         {
             AuthenticateResult refreshed = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-            if (refreshed.Principal?.GetClaim(Toda.Platform.Acting.ActingContext.TokenClaim) is not null)
+            if (refreshed.Principal?.GetClaim(Toda.Guard.Acting.ActingContext.TokenClaim) is not null)
             {
                 if (request.GetParameter(StepUpParameter) is not null)
                 {
@@ -205,7 +205,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
             return Refuse("The account is no longer active.");
         }
 
-        return SignIn(AppPrincipals.For(account, granted.GetAuthorizationId()!, granted.GetClaim(Toda.Platform.Acting.ActingContext.TokenAccessClaim) ?? TokenAccess.Read,
+        return SignIn(AppPrincipals.For(account, granted.GetAuthorizationId()!, granted.GetClaim(Toda.Guard.Acting.ActingContext.TokenAccessClaim) ?? TokenAccess.Read,
             granted.GetScopes()), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 

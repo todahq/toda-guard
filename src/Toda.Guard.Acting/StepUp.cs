@@ -4,7 +4,7 @@ using Volo.Abp;
 using Toda.Guard;
 using Volo.Abp.DependencyInjection;
 
-namespace Toda.Platform.Acting;
+namespace Toda.Guard.Acting;
 
 /// <summary>How recently a person must have proved who they are to do something sensitive (ADR 0042). Guard keeps it.</summary>
 public interface IStepUpPolicy

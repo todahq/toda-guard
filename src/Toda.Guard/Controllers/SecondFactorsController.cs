@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Toda.Guard.Services.TwoFactor;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 
 namespace Toda.Guard.Controllers;
 

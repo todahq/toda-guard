@@ -19,7 +19,7 @@ public class SampleHostModule : AbpModule
         app.UseAuthentication();
         app.UseAuthorization();
         // A read-only token reads only (ADR 0042).
-        app.UseMiddleware<Toda.Platform.Acting.ReadOnlyRequests>();
+        app.UseMiddleware<Toda.Guard.Acting.ReadOnlyRequests>();
         app.UseConfiguredEndpoints();
     }
 }

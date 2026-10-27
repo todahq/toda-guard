@@ -1,6 +1,6 @@
 using Casl;
 
-namespace Toda.Platform.Acting;
+namespace Toda.Guard.Acting;
 
 /// <summary>
 /// Narrows the request's own ability (ADR 0042): a token's scopes, an impersonation's fixed denies. Applied by guard to

@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Toda.Guard.Domain;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using OpenIddict.Abstractions;
 using Volo.Abp.DependencyInjection;
 

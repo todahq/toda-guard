@@ -4,7 +4,7 @@ using Casl;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Services;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using Xunit;
 
 namespace Toda.Guard.Tests;

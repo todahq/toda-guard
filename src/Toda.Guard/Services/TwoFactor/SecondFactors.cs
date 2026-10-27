@@ -6,7 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using QRCoder;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;

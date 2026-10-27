@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 using System.Text.Json;
 using Toda.Guard.Controllers;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using OpenIddict.Abstractions;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;

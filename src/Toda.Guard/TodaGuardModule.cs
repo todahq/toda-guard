@@ -202,7 +202,7 @@ public sealed class TodaAdminRequirement : IAuthorizationRequirement;
 /// internal toda-admins group (by id, never by name), so it follows group membership including nesting. The ability
 /// is the request's, through the acting context, so a token's limits apply here too (ADR 0042).
 /// </summary>
-public sealed class TodaAdminHandler(AbilityFactory abilities, Toda.Platform.Acting.ActingContext acting) : AuthorizationHandler<TodaAdminRequirement>
+public sealed class TodaAdminHandler(AbilityFactory abilities, Toda.Guard.Acting.ActingContext acting) : AuthorizationHandler<TodaAdminRequirement>
 {
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, TodaAdminRequirement requirement)
     {

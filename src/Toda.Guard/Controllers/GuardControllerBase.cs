@@ -1,4 +1,4 @@
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Toda.Guard.Domain;

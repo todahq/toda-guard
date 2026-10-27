@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Controllers;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using OpenIddict.Abstractions;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Entities;

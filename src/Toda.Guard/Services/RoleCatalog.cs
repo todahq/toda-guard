@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Casl;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Entities;

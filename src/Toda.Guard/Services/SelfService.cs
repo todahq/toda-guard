@@ -140,7 +140,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
             (s.Enabled, s.DirectoryId, s.EmailDomains, s.UpdatedAt) = (input.Enabled, input.DirectoryId, domains, DateTime.UtcNow);
             // Who may make themselves an account, and in which directory (ADR 0037).
             string? directoryName = s.DirectoryId is { } d ? await db.Directories.Where(x => x.Id == d).Select(x => x.Name).FirstOrDefaultAsync(ct) : null;
-            audit.Add(db, SecurityAuditTypes.SignUpChanged, new Toda.Platform.Acting.AuditTarget("SignUp", s.DirectoryId, directoryName),
+            audit.Add(db, SecurityAuditTypes.SignUpChanged, new Toda.Guard.Acting.AuditTarget("SignUp", s.DirectoryId, directoryName),
                 new { before, after = new { enabled = s.Enabled, directoryId = s.DirectoryId, emailDomains = s.EmailDomains } });
             await db.SaveChangesAsync(ct);
         }, requiresNew: true, ct);

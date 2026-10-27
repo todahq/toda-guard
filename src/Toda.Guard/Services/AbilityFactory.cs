@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Casl;
 using Toda.Guard.Domain;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;

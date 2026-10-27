@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using Volo.Abp.Domain.Entities;
 
 namespace Toda.Guard.Controllers;

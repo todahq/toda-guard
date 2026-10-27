@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Volo.Abp.DependencyInjection;
 
-namespace Toda.Platform.Acting;
+namespace Toda.Guard.Acting;
 
 /// <summary>How someone acts for another person (ADR 0042).</summary>
 public static class ActingModes

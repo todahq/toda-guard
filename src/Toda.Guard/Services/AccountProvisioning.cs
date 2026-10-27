@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Domain;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;

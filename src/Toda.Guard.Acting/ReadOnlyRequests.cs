@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Toda.Platform.Acting;
+namespace Toda.Guard.Acting;
 
 /// <summary>
 /// Marks an endpoint that changes nothing although it isn't a GET: a query, an export, a preview, a plan. A request

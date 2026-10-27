@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
-using Toda.Platform.Acting;
+using Toda.Guard.Acting;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using Volo.Abp;
