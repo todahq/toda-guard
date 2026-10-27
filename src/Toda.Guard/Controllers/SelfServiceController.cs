@@ -23,11 +23,13 @@ public class SelfServiceController(SelfService self, SelfServiceLimiter limiter,
     /// <summary>Whether people may sign up here, and with which email domains (all when empty).</summary>
     [AllowAnonymous]
     [HttpGet("signup")]
+    [GuardFeature(nameof(GuardFeatures.SignUp))]
     public Task<SignUpInfoDto> Info(CancellationToken cancellationToken) => self.InfoAsync(cancellationToken);
 
     /// <summary>Creates an account that's active once its email is confirmed, and mails the link.</summary>
     [AllowAnonymous]
     [HttpPost("signup")]
+    [GuardFeature(nameof(GuardFeatures.SignUp))]
     public async Task<NoContentResult> SignUp([FromBody] SignUpInput input, CancellationToken cancellationToken)
     {
         await LimitAsync("signup", input.Email, cancellationToken);
@@ -43,6 +45,7 @@ public class SelfServiceController(SelfService self, SelfServiceLimiter limiter,
     /// <summary>Confirms an email from the link in the mail; the account can sign in from then on.</summary>
     [AllowAnonymous]
     [HttpPost("signup/verify")]
+    [GuardFeature(nameof(GuardFeatures.SignUp))]
     public async Task<object> Verify([FromBody] TokenInput input, CancellationToken cancellationToken)
     {
         await LimitAsync("verify", null, cancellationToken);
@@ -82,6 +85,7 @@ public class SelfServiceController(SelfService self, SelfServiceLimiter limiter,
 /// <summary>Sign-up as site admins set it (ADR 0037): on or off, the internal directory accounts go to, and the email domains it takes.</summary>
 [Route("api/guard/signup/settings")]
 [Authorize(Policy = GuardPolicies.Admin)]
+[GuardFeature(nameof(GuardFeatures.SignUp))]
 public class SignUpSettingsController(SelfService self) : GuardControllerBase
 {
     [HttpGet]

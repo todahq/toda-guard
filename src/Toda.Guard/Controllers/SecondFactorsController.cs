@@ -26,6 +26,7 @@ public sealed record MySecondFactorSendInput(string? Method);
 /// </summary>
 [Route("api/guard/second-factor")]
 [AllowAnonymous]
+[GuardFeature(nameof(GuardFeatures.TwoFactor))]
 public class SecondFactorCodesController(SecondFactors secondFactors) : GuardControllerBase
 {
     [HttpPost("send")]
@@ -54,6 +55,7 @@ public class SecondFactorCodesController(SecondFactors secondFactors) : GuardCon
 /// </summary>
 [Route("api/guard/second-factor/enrol")]
 [AllowAnonymous]
+[GuardFeature(nameof(GuardFeatures.TwoFactor))]
 public class SecondFactorEnrolmentController(SecondFactors secondFactors) : GuardControllerBase
 {
     /// <summary>Starts setting up the authenticator app: its secret, address and QR code.</summary>
@@ -96,6 +98,7 @@ public class SecondFactorEnrolmentController(SecondFactors secondFactors) : Guar
 /// </summary>
 [Route("api/guard/me/second-factors")]
 [Authorize]
+[GuardFeature(nameof(GuardFeatures.TwoFactor))]
 public class MySecondFactorsController(SecondFactors secondFactors) : GuardControllerBase
 {
     [HttpGet]

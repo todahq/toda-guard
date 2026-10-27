@@ -145,6 +145,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
     /// <summary>A person's second factors as an admin sees them (ADR 0082): what their groups ask, what they set up, the recovery codes left.</summary>
     [HttpGet("{id:guid}/second-factors")]
+    [GuardFeature(nameof(GuardFeatures.TwoFactor))]
     public async Task<Services.TwoFactor.MySecondFactorsDto> SecondFactors(Guid id, [FromServices] Services.TwoFactor.SecondFactors secondFactors,
         CancellationToken cancellationToken)
     {
@@ -157,6 +158,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     /// goes, and a group that requires one has them set it up again at their next sign-in.
     /// </summary>
     [HttpDelete("{id:guid}/second-factors")]
+    [GuardFeature(nameof(GuardFeatures.TwoFactor))]
     [StepUp]
     public async Task<NoContentResult> ResetSecondFactors(Guid id, [FromServices] Services.TwoFactor.SecondFactors secondFactors, CancellationToken cancellationToken)
     {
@@ -263,6 +265,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
     /// <summary>What merging this account into another would move, without moving anything.</summary>
     [HttpPost("{id:guid}/merge/preview")]
+    [GuardFeature(nameof(GuardFeatures.Merges))]
     [Reads]
     public async Task<MergePreviewDto> PreviewMerge(Guid id, [FromBody] MergeInput input, CancellationToken cancellationToken)
     {
@@ -275,6 +278,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     /// account that can sign in needs Confirm to be its username.
     /// </summary>
     [HttpPost("{id:guid}/merge")]
+    [GuardFeature(nameof(GuardFeatures.Merges))]
     [StepUp]
     public async Task<AccountMergeDto> Merge(Guid id, [FromBody] MergeInput input, CancellationToken cancellationToken)
     {
@@ -299,6 +303,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 /// <summary>Merges as recorded (ADR 0044): every one, or an account's; and resuming one a plugin didn't finish.</summary>
 [Route("api/guard/merges")]
 [Authorize]
+[GuardFeature(nameof(GuardFeatures.Merges))]
 public class MergesController(AccountMergeService merges) : GuardControllerBase
 {
     [HttpGet]

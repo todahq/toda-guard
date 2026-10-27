@@ -20,6 +20,9 @@ public sealed class GuardOptions
     /// </summary>
     public string AdminsGroupName { get; set; } = "toda-admins";
 
+    /// <summary>What the host uses of Guard; each off removes that feature's endpoints (all on by default).</summary>
+    public GuardFeatures Features { get; set; } = new();
+
     /// <summary>The site's defaults when a host doesn't say (<see cref="IGuardSiteDefaults"/>).</summary>
     public GuardSiteOptions Site { get; set; } = new();
 

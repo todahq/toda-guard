@@ -56,6 +56,9 @@ public class TodaGuardModule : AbpModule
         // Guard's settings (ADR 0087), and the site's defaults from them unless the host has its own.
         context.Services.Configure<GuardOptions>(configuration.GetSection(GuardOptions.Section));
         context.Services.TryAddTransient<IGuardSiteDefaults, OptionsGuardSiteDefaults>();
+        // What the host uses of Guard (ADR 0087): a feature switched off loses its endpoints.
+        context.Services.AddOptions<Microsoft.AspNetCore.Mvc.MvcOptions>()
+            .Configure<Microsoft.Extensions.Options.IOptions<GuardOptions>>((mvc, guard) => mvc.Conventions.Add(new GuardFeatureConvention(guard.Value.Features)));
         // No tools for tokens to be limited to, and no challenge on sign-up, unless the host has them.
         context.Services.TryAddTransient<ITokenRestrictions, NoTokenRestrictions>();
         context.Services.TryAddTransient<ISignUpChallenges, NoSignUpChallenges>();

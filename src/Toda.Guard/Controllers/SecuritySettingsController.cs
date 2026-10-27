@@ -126,6 +126,7 @@ public sealed record SecondFactorSettingsInput(List<string>? Methods);
 /// </summary>
 [Route("api/guard/security/second-factor")]
 [Authorize(Policy = GuardPolicies.Admin)]
+[GuardFeature(nameof(GuardFeatures.TwoFactor))]
 public class SecondFactorSettingsController(GuardDb guardDb, SecurityLog audit, IGuardMessenger messenger) : GuardControllerBase
 {
     [HttpGet]

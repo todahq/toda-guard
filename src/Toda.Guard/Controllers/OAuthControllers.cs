@@ -27,6 +27,7 @@ namespace Toda.Guard.Controllers;
 /// </summary>
 [ApiExplorerSettings(IgnoreApi = true)]
 [UnitOfWork(IsDisabled = true)]
+[GuardFeature(nameof(GuardFeatures.OAuthApps))]
 public class AuthorizationController(OAuthApps apps, GuardDb guardDb) : GuardControllerBase
 {
     public const string DecisionParameter = "decision";
@@ -121,6 +122,7 @@ public static class AppPrincipals
 /// <c>Guard:Oidc:ClientRegistration</c> false.
 /// </summary>
 [ApiExplorerSettings(IgnoreApi = true)]
+[GuardFeature(nameof(GuardFeatures.ClientRegistration))]
 public class ClientRegistrationController(OAuthApps apps, IConfiguration configuration) : GuardControllerBase
 {
     [HttpPost("~/connect/register")]
@@ -164,6 +166,7 @@ public class ClientRegistrationController(OAuthApps apps, IConfiguration configu
 /// </summary>
 [Route("api/guard")]
 [Authorize]
+[GuardFeature(nameof(GuardFeatures.OAuthApps))]
 public class OAuthAppsController(OAuthApps apps) : GuardControllerBase
 {
     [HttpGet("oauth/apps")]

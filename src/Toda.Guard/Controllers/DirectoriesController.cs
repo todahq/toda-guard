@@ -14,6 +14,7 @@ using Volo.Abp.Domain.Entities;
 namespace Toda.Guard.Controllers;
 
 [Route("api/guard")]
+[GuardFeature(nameof(GuardFeatures.Directories))]
 [Authorize(Policy = GuardPolicies.Admin)]
 public class DirectoriesController(
     GuardDb guardDb,

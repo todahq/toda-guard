@@ -14,6 +14,7 @@ namespace Toda.Guard.Controllers;
 /// make another: making one is sensitive, and tokens never pass a step-up.
 /// </summary>
 [Route("api/guard/me/tokens")]
+[GuardFeature(nameof(GuardFeatures.PersonalTokens))]
 [Authorize]
 public class MyTokensController(PersonalTokens tokens, GuardDb guardDb) : GuardControllerBase
 {
@@ -44,6 +45,7 @@ public sealed record TokenLimitsDto(int MaxDays);
 
 /// <summary>Every live token on the site, for site admins, who may revoke any.</summary>
 [Route("api/guard/tokens")]
+[GuardFeature(nameof(GuardFeatures.PersonalTokens))]
 [Authorize(Policy = GuardPolicies.Admin)]
 public class TokensController(PersonalTokens tokens) : GuardControllerBase
 {
@@ -124,6 +126,7 @@ public class ServiceAccountsController(GuardDb guardDb, AccountProjector project
     }
 
     [HttpGet("{id:guid}/tokens")]
+    [GuardFeature(nameof(GuardFeatures.PersonalTokens))]
     public async Task<List<PersonalTokenDto>> Tokens(Guid id, CancellationToken cancellationToken)
     {
         await ServiceAccountAsync(id, cancellationToken);
@@ -132,6 +135,7 @@ public class ServiceAccountsController(GuardDb guardDb, AccountProjector project
 
     /// <summary>A token for the service account, shown once: sensitive, so it needs a step-up.</summary>
     [HttpPost("{id:guid}/tokens")]
+    [GuardFeature(nameof(GuardFeatures.PersonalTokens))]
     [StepUp]
     public async Task<NewPersonalTokenDto> CreateToken(Guid id, [FromBody] CreatePersonalTokenInput input, CancellationToken cancellationToken)
     {
@@ -140,6 +144,7 @@ public class ServiceAccountsController(GuardDb guardDb, AccountProjector project
     }
 
     [HttpDelete("{id:guid}/tokens/{tokenId:guid}")]
+    [GuardFeature(nameof(GuardFeatures.PersonalTokens))]
     public async Task<NoContentResult> RevokeToken(Guid id, Guid tokenId, CancellationToken cancellationToken)
     {
         await tokens.RevokeAsync(tokenId, id, CurrentAccountId, cancellationToken);

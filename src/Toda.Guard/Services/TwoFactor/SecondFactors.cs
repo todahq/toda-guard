@@ -86,7 +86,7 @@ public sealed class SecondFactors(
     private IDataProtector Protector => protection.CreateProtector("Toda.Guard.SecondFactor.v1");
 
     /// <summary>The emergency switch: nobody is asked for a second factor.</summary>
-    public bool Disabled => configuration.GetValue("Guard:TwoFactor:Disabled", false);
+    public bool Disabled => configuration.GetValue("Guard:TwoFactor:Disabled", false) || !options.Value.Features.TwoFactor;
 
     /// <summary>The strictest mode of every group the person is in, directly, nested or synced (ADR 0082).</summary>
     public async Task<string> ModeAsync(GuardDbContext db, Account account, CancellationToken cancellationToken)

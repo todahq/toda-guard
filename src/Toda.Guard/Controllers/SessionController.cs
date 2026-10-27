@@ -91,6 +91,7 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
     /// <c>recovery</c> code); or the ticket alone, once a second factor was set up with it. Answers as signing in does.
     /// </summary>
     [HttpPost("second-factor")]
+    [GuardFeature(nameof(GuardFeatures.TwoFactor))]
     [AllowAnonymous]
     [ProducesResponseType<SessionDto>(200)]
     public async Task<IActionResult> SecondFactor([FromBody] SessionSecondFactorInput input, CancellationToken cancellationToken)
@@ -198,6 +199,7 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
     /// 30 seconds, which the web view opens below. Only the app asks: not a browser, a script or another app.
     /// </summary>
     [HttpPost("handoff")]
+    [GuardFeature(nameof(GuardFeatures.Handoff))]
     [Authorize]
     [ProducesResponseType<SessionHandoffDto>(200)]
     public async Task<IActionResult> HandOff([FromServices] AccountSessions accountSessions, CancellationToken cancellationToken)
@@ -219,6 +221,7 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
     /// address only for these seconds: the answer is a redirect that sends no referrer and isn't kept.
     /// </summary>
     [HttpGet("handoff")]
+    [GuardFeature(nameof(GuardFeatures.Handoff))]
     [AllowAnonymous]
     public async Task<IActionResult> TakeHandoff([FromQuery] string? code, [FromQuery] string? next, [FromQuery] string? lang,
         CancellationToken cancellationToken)
