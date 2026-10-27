@@ -169,6 +169,19 @@ public class TodaGuardModule : AbpModule
 
     public override void OnApplicationInitialization(Volo.Abp.ApplicationInitializationContext context)
     {
+        // What Guard protects lives and dies with the key ring (ADR 0082, 0087): a site that doesn't keep it doesn't start;
+        // a developer's machine is told.
+        if (GuardKeyRing.Problem(context.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.DataProtection.KeyManagement.KeyManagementOptions>>().Value) is { } keyRing)
+        {
+            if (!context.ServiceProvider.GetRequiredService<IHostEnvironment>().IsDevelopment())
+            {
+                throw new InvalidOperationException($"Guard can't start: {keyRing}. Keep the key ring where every server and restart reads it (Toda keeps it in Postgres).");
+            }
+
+            context.ServiceProvider.GetRequiredService<ILogger<TodaGuardModule>>().LogWarning(
+                "Guard: {Problem}; what Guard protected (authenticator secrets, mailed links, directory passwords) is lost with it", keyRing);
+        }
+
         // A test site shows accounts' passwords on its sign-in page: said once at start, so a site people use doesn't by mistake.
         if (context.ServiceProvider.GetRequiredService<TestAccounts>().List() is { Count: > 0 } shown)
         {

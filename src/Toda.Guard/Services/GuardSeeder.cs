@@ -11,7 +11,8 @@ using Volo.Abp.DependencyInjection;
 namespace Toda.Guard.Services;
 
 /// <summary>Creates the internal directory, the first admin, and the toda-admins and toda-users groups.</summary>
-public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfiguration configuration, IHostEnvironment environment, ILogger<GuardSeeder> logger)
+public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfiguration configuration, IHostEnvironment environment,
+    Microsoft.Extensions.Options.IOptions<GuardOptions> options, ILogger<GuardSeeder> logger)
     : ITransientDependency
 {
     public Task SeedAsync(CancellationToken cancellationToken = default)
@@ -45,7 +46,7 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
             db.DirectoryUsers.Add(admin);
         }
 
-        await EnsureGroupAsync(db, GuardConstants.AdminsGroupId, "toda-admins", "Toda administrators. Members, direct or nested, can administer Toda.", cancellationToken);
+        await EnsureGroupAsync(db, GuardConstants.AdminsGroupId, options.Value.AdminsGroupName, "Toda administrators. Members, direct or nested, can administer Toda.", cancellationToken);
         await EnsureGroupAsync(db, GuardConstants.UsersGroupId, "toda-users", "Everyone who may sign in to Toda.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await DirectoryGroups.EnsureAsync(db, cancellationToken);

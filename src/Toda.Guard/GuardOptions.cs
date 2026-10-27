@@ -14,6 +14,12 @@ public sealed class GuardOptions
     /// </summary>
     public string? PublicUrl { get; set; }
 
+    /// <summary>
+    /// The name the site's admins group is made with, once, at the first start (its id is fixed, GuardConstants.AdminsGroupId,
+    /// and admin rights follow the id, never the name). Toda's is toda-admins.
+    /// </summary>
+    public string AdminsGroupName { get; set; } = "toda-admins";
+
     /// <summary>The site's defaults when a host doesn't say (<see cref="IGuardSiteDefaults"/>).</summary>
     public GuardSiteOptions Site { get; set; } = new();
 
