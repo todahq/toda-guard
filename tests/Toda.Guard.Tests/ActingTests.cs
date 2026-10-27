@@ -143,7 +143,7 @@ public partial class ActingTests
             root = Path.GetDirectoryName(root) ?? throw new InvalidOperationException("Toda.slnx not found above the test folder.");
         }
 
-        string allowed = Path.Combine("src", "Toda.Platform", "Acting", "ActingContext.cs");
+        string allowed = Path.Combine("src", "Toda.Guard.Acting", "ActingContext.cs");
         List<string> readers = Directory.EnumerateFiles(Path.Combine(root, "src"), "*.cs", SearchOption.AllDirectories)
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
             .Where(f => ReadsSubject().IsMatch(File.ReadAllText(f)))

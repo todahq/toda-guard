@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Toda.Platform\Toda.Platform.csproj" />
     <ProjectReference Include="..\Toda.Guard.Contracts\Toda.Guard.Contracts.csproj" />
+    <ProjectReference Include="..\Toda.Guard.Acting\Toda.Guard.Acting.csproj" />
   </ItemGroup>
 
   <ItemGroup>
