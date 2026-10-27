@@ -34,7 +34,9 @@ public sealed class GuardFeatures
     /// <summary>A second step at sign-in; off, no one is asked for one, as with Guard:TwoFactor:Disabled.</summary>
     public bool TwoFactor { get; set; } = true;
 
-    /// <summary>People exporting their own data (PDPL, ADR 0082).</summary>
+    /// <summary>
+    /// Exporting a person's data (PDPL, ADR 0082): their own, and admins' exports of an account or of someone outside.
+    /// </summary>
     public bool DataExport { get; set; } = true;
 
     /// <summary>Whether the feature of this name is on; an unknown name is.</summary>

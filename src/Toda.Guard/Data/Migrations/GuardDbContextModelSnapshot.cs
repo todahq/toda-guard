@@ -426,8 +426,9 @@ namespace Toda.Guard.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
-                    b.PrimitiveCollection<List<Guid>>("ProjectIds")
-                        .HasColumnType("uuid[]");
+                    b.PrimitiveCollection<List<Guid>>("ResourceIds")
+                        .HasColumnType("uuid[]")
+                        .HasColumnName("ProjectIds");
 
                     b.Property<DateTime?>("RevokedAt")
                         .HasColumnType("timestamp with time zone");

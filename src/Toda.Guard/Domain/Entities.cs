@@ -406,7 +406,7 @@ public class PersonalAccessToken : Entity<Guid>
     {
     }
 
-    public PersonalAccessToken(Guid id, Guid accountId, string name, string prefix, string secretHash, string access, List<Guid>? projectIds, DateTime expiresAt, Guid createdBy,
+    public PersonalAccessToken(Guid id, Guid accountId, string name, string prefix, string secretHash, string access, List<Guid>? resourceIds, DateTime expiresAt, Guid createdBy,
         List<string>? tools = null)
         : base(id)
     {
@@ -416,7 +416,7 @@ public class PersonalAccessToken : Entity<Guid>
         Prefix = prefix;
         SecretHash = secretHash;
         Access = access;
-        ProjectIds = projectIds;
+        ResourceIds = resourceIds;
         ExpiresAt = expiresAt;
         CreatedBy = createdBy;
         CreatedAt = DateTime.UtcNow;
@@ -433,8 +433,11 @@ public class PersonalAccessToken : Entity<Guid>
 
     public string Access { get; private set; } = null!;
 
-    /// <summary>The projects it's limited to; null for every project the account may use.</summary>
-    public List<Guid>? ProjectIds { get; private set; }
+    /// <summary>
+    /// The resources it's limited to (the host's: Toda's projects, ADR 0087); null for everything the account may use. Kept in
+    /// the column ProjectIds.
+    /// </summary>
+    public List<Guid>? ResourceIds { get; private set; }
 
     /// <summary>The tools it may use (their catalog names, M7); null for every tool the account may use.</summary>
     public List<string>? Tools { get; private set; }

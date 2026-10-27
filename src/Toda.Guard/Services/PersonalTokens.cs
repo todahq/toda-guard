@@ -184,11 +184,11 @@ public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGra
 
     private async Task<List<PersonalTokenDto>> ToDtosAsync(List<PersonalAccessToken> tokens, Dictionary<Guid, string> usernames, CancellationToken cancellationToken)
     {
-        Dictionary<string, GrantScopeLabel> labels = await DescribeAsync(tokens.SelectMany(t => t.ProjectIds ?? []).Distinct().ToList(), cancellationToken);
+        Dictionary<string, GrantScopeLabel> labels = await DescribeAsync(tokens.SelectMany(t => t.ResourceIds ?? []).Distinct().ToList(), cancellationToken);
         DateTime now = DateTime.UtcNow;
         return tokens.Select(t => new PersonalTokenDto(
                 t.Id, t.AccountId, usernames.GetValueOrDefault(t.AccountId, "(removed)"), t.Name, t.Prefix, t.Access,
-                t.ProjectIds?.Select(p => labels.TryGetValue(ScopeKey(p), out GrantScopeLabel? l) ? new TokenProjectDto(p, l.Label, l.Href) : new TokenProjectDto(p, p.ToString(), null)).ToList(),
+                t.ResourceIds?.Select(p => labels.TryGetValue(ScopeKey(p), out GrantScopeLabel? l) ? new TokenProjectDto(p, l.Label, l.Href) : new TokenProjectDto(p, p.ToString(), null)).ToList(),
                 t.ExpiresAt, t.CreatedAt, t.LastUsedAt, t.LastUsedIp, t.RevokedAt, t.IsActive(now), t.Tools))
             .ToList();
     }
@@ -256,7 +256,7 @@ public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOpt
             identity.AddClaim(new Claim(ActingContext.TokenToolClaim, tool));
         }
 
-        foreach (Guid project in found.Token.ProjectIds ?? [])
+        foreach (Guid project in found.Token.ResourceIds ?? [])
         {
             identity.AddClaim(new Claim(ActingContext.TokenProjectClaim, project.ToString()));
         }

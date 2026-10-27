@@ -240,6 +240,7 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
             b.Property(x => x.SecretHash).HasMaxLength(64).IsRequired();
             b.Property(x => x.Access).HasMaxLength(16).IsRequired();
             b.Property(x => x.LastUsedIp).HasMaxLength(64);
+            b.Property(x => x.ResourceIds).HasColumnName("ProjectIds"); // Guard's word, the column as it always was (ADR 0087)
             b.HasIndex(x => x.SecretHash).IsUnique();
             b.HasIndex(x => x.AccountId);
         });
