@@ -71,6 +71,11 @@ public static class SecurityAuditTypes
     public const string PrivacyStore = "privacy.store";
     public const string PrivacySettings = "settings.privacy";
     public const string PrivacyRecordExported = "privacy.record.exported";
+
+    /// <summary>A person's data exported (ADR 0082, step 3): by themself, by an admin for an account, or for an address.</summary>
+    public const string PrivacyExportSelf = "privacy.export.self";
+    public const string PrivacyExportAccount = "privacy.export.account";
+    public const string PrivacyExportAddress = "privacy.export.address";
 }
 
 /// <summary>

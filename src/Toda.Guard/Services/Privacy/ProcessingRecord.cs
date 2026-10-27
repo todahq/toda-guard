@@ -293,7 +293,7 @@ public static class ProcessingRecord
         }
     }
 
-    private static string Kept(string kept, ProcessingRecordTexts t) => kept switch
+    internal static string Kept(string kept, ProcessingRecordTexts t) => kept switch
     {
         PersonalDataKept.UntilDone => t.UntilDone,
         PersonalDataKept.WithAccount => t.WithAccount,

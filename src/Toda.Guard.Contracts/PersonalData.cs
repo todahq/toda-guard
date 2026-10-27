@@ -190,8 +190,9 @@ public interface IPluginPersonalDataSource
 /// </summary>
 public sealed record PersonalDataSubject(Guid? AccountId, IReadOnlyList<string> Emails, IReadOnlyList<string> Phones)
 {
+    /// <summary>Someone outside Toda by an address: an email in lower case, as addresses are compared.</summary>
     public static PersonalDataSubject Outside(string? email, string? phone) =>
-        new(null, string.IsNullOrWhiteSpace(email) ? [] : [email.Trim()], string.IsNullOrWhiteSpace(phone) ? [] : [phone.Trim()]);
+        new(null, string.IsNullOrWhiteSpace(email) ? [] : [email.Trim().ToLowerInvariant()], string.IsNullOrWhiteSpace(phone) ? [] : [phone.Trim()]);
 }
 
 /// <summary>
@@ -239,6 +240,31 @@ public interface IPersonalDataExporter
     IReadOnlyList<string> Stores { get; }
 
     Task ExportAsync(IPersonalDataExport export, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Rows for <see cref="IPersonalDataExport.WriteAsync"/>.</summary>
+public static class PersonalDataRows
+{
+    /// <summary>Rows already in memory, as the export takes them.</summary>
+    public static async IAsyncEnumerable<System.Text.Json.Nodes.JsonObject> Of(IEnumerable<System.Text.Json.Nodes.JsonObject> rows)
+    {
+        foreach (System.Text.Json.Nodes.JsonObject row in rows)
+        {
+            yield return row;
+        }
+
+        await Task.CompletedTask;
+    }
+}
+
+/// <summary>Keys a row of an export may carry that Guard reads (ADR 0082, step 3).</summary>
+public static class PersonalDataExportKeys
+{
+    /// <summary>
+    /// <c>true</c> on a row about an item the person can no longer read (a record they left): only in an admin's export,
+    /// counted in its index, for the controller to redact if it must before handing the export over.
+    /// </summary>
+    public const string NoLongerReadable = "noLongerReadable";
 }
 
 /// <summary>
