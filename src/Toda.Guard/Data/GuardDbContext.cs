@@ -70,7 +70,8 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
 
         builder.Entity<Account>(b =>
         {
-            b.ToTable("accounts");
+            // An agent's account is always a service account, so its kind can't come out wrong.
+            b.ToTable("accounts", t => t.HasCheckConstraint("CK_accounts_agent_is_service", "NOT \"IsAgent\" OR \"IsService\""));
             b.Property(x => x.Username).HasMaxLength(256).IsRequired();
             b.Property(x => x.NormalizedUsername).HasMaxLength(256).IsRequired();
             b.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);

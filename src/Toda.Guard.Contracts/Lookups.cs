@@ -8,7 +8,22 @@ namespace Toda.Guard;
 /// preferences (null: the site's); MergedIntoId is the account it was merged into, if it was.
 /// </summary>
 public sealed record AccountInfo(Guid Id, string Username, string DisplayName, string? Email, bool IsActive, Guid DirectoryId, string? Language = null,
-    string? TimeZone = null, Guid? MergedIntoId = null, bool IsService = false);
+    string? TimeZone = null, Guid? MergedIntoId = null, bool IsService = false)
+{
+    /// <summary>An agent's account: a service account an automated actor works through, which holds no tokens.</summary>
+    public bool IsAgent { get; init; }
+
+    /// <summary>What the account is: <see cref="AccountKinds"/>.</summary>
+    public string Kind => IsAgent ? AccountKinds.Agent : IsService ? AccountKinds.Service : AccountKinds.Person;
+}
+
+/// <summary>What an account is: a person, a service account, or an agent's account (a service account an automated actor works through).</summary>
+public static class AccountKinds
+{
+    public const string Person = "person";
+    public const string Service = "service";
+    public const string Agent = "agent";
+}
 
 /// <summary>A group as other modules see it; Kind is standard, directory, ou or organization (ADR 0037).</summary>
 public sealed record GroupInfo(Guid Id, string Name, string? Description, Guid DirectoryId, string Kind = "standard");

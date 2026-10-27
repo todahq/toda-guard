@@ -73,13 +73,14 @@ public sealed record CreateServiceAccountInput(string Username, string? DisplayN
 /// </summary>
 [Route("api/guard/service-accounts")]
 [Authorize(Policy = GuardPolicies.Admin)]
-public class ServiceAccountsController(GuardDb guardDb, AccountProjector projector, PersonalTokens tokens, SecurityLog audit) : GuardControllerBase
+public class ServiceAccountsController(GuardDb guardDb, ServiceAccountMaker maker, PersonalTokens tokens) : GuardControllerBase
 {
     [HttpGet]
     public Task<List<ServiceAccountDto>> List(CancellationToken cancellationToken) => guardDb.RunAsync(async db =>
     {
         DateTime now = DateTime.UtcNow;
-        List<Account> accounts = await db.Accounts.AsNoTracking().Where(a => a.IsService).OrderBy(a => a.Username).ToListAsync(cancellationToken);
+        // Agents' accounts are made and listed by the host with their agents, and hold no tokens.
+        List<Account> accounts = await db.Accounts.AsNoTracking().Where(a => a.IsService && !a.IsAgent).OrderBy(a => a.Username).ToListAsync(cancellationToken);
         List<Guid> ids = accounts.Select(a => a.Id).ToList();
         Dictionary<Guid, int> live = await db.PersonalAccessTokens.Where(t => ids.Contains(t.AccountId) && t.RevokedAt == null && t.ExpiresAt > now)
             .GroupBy(t => t.AccountId).ToDictionaryAsync(g => g.Key, g => g.Count(), cancellationToken);
@@ -90,39 +91,8 @@ public class ServiceAccountsController(GuardDb guardDb, AccountProjector project
     [HttpPost]
     public async Task<ServiceAccountDto> Create([FromBody] CreateServiceAccountInput input, CancellationToken cancellationToken)
     {
-        string username = (input.Username ?? "").Trim();
-        if (!Usernames.Pattern().IsMatch(username))
-        {
-            throw new UserFriendlyException(Usernames.Rule);
-        }
-
-        string normalized = GuardConstants.Normalize(username);
-        (ServiceAccountDto dto, List<object> events) = await guardDb.RunAsync(async db =>
-        {
-            if (await db.DirectoryUsers.AnyAsync(u => u.DirectoryId == GuardConstants.InternalDirectoryId && u.NormalizedUsername == normalized, cancellationToken)
-                || await db.Accounts.AnyAsync(a => a.NormalizedUsername == normalized, cancellationToken))
-            {
-                throw new UserFriendlyException($"There's already an account called '{username}'.");
-            }
-
-            // No password and no address: it can't sign in, and no reset or mail reaches it.
-            db.DirectoryUsers.Add(new DirectoryUser(Guid.NewGuid(), GuardConstants.InternalDirectoryId, $"internal:{normalized}", username)
-            {
-                DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? username : input.DisplayName.Trim(),
-            });
-            await db.SaveChangesAsync(cancellationToken);
-            List<object> events = await projector.RebuildAsync(db, [normalized], cancellationToken);
-            await db.SaveChangesAsync(cancellationToken);
-            Account account = await db.Accounts.FirstAsync(a => a.NormalizedUsername == normalized, cancellationToken);
-            account.IsService = true;
-            string directory = await db.Directories.Where(d => d.Id == account.DirectoryId).Select(d => d.Name).FirstAsync(cancellationToken);
-            audit.Add(db, SecurityAuditTypes.AccountCreated, new AuditTarget("Account", account.Id, account.Username), new { directory, service = true });
-            await db.SaveChangesAsync(cancellationToken);
-            return (new ServiceAccountDto(AccountDto.From(account, directory), 0), events);
-        }, requiresNew: true, cancellationToken, isTransactional: true);
-
-        await PublishAsync(events);
-        return dto;
+        (Account account, string directory) = await maker.MakeAsync(new ServiceAccountInput(input.Username ?? "") { DisplayName = input.DisplayName }, cancellationToken);
+        return new ServiceAccountDto(AccountDto.From(account, directory), 0);
     }
 
     [HttpGet("{id:guid}/tokens")]
@@ -153,7 +123,7 @@ public class ServiceAccountsController(GuardDb guardDb, AccountProjector project
 
     private Task ServiceAccountAsync(Guid id, CancellationToken cancellationToken) => guardDb.RunAsync(async db =>
     {
-        if (!await db.Accounts.AnyAsync(a => a.Id == id && a.IsService, cancellationToken))
+        if (!await db.Accounts.AnyAsync(a => a.Id == id && a.IsService && !a.IsAgent, cancellationToken))
         {
             throw new EntityNotFoundException(typeof(Account), id);
         }

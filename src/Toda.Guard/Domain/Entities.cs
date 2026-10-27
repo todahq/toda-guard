@@ -159,6 +159,20 @@ public class Account : Entity<Guid>
     /// personal access tokens an admin makes for it.
     /// </summary>
     public bool IsService { get; set; }
+
+    /// <summary>
+    /// An agent's account: a service account an automated actor works through, made and kept by the host. It holds no
+    /// tokens: the actor acts only through the host's own work, never through a token. Always a service account too:
+    /// set only with <see cref="MakeService"/>, and held by a check in the database.
+    /// </summary>
+    public bool IsAgent { get; private set; }
+
+    /// <summary>Marks a new account as a service account, or as an agent's, which is always a service account too.</summary>
+    public void MakeService(bool agent = false)
+    {
+        IsService = true;
+        IsAgent = agent;
+    }
 }
 
 /// <summary>

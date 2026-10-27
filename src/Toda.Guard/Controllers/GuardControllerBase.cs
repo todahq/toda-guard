@@ -95,8 +95,14 @@ public sealed record AccountDto(
     Guid Id, string Username, string DisplayName, string? Email, string Status, string? StatusReason,
     Guid DirectoryId, string DirectoryName, DateTime? LastLoginAt, Guid? MergedIntoId = null, string? MailTo = null, bool IsService = false)
 {
+    /// <summary>An agent's account: a service account an automated actor works through, which holds no tokens.</summary>
+    public bool IsAgent { get; init; }
+
     public static AccountDto From(Account a, string directoryName) =>
-        new(a.Id, a.Username, a.DisplayName, a.Email, a.Status.ToString(), a.StatusReason, a.DirectoryId, directoryName, a.LastLoginAt, a.MergedIntoId, a.MailTo, a.IsService);
+        new(a.Id, a.Username, a.DisplayName, a.Email, a.Status.ToString(), a.StatusReason, a.DirectoryId, directoryName, a.LastLoginAt, a.MergedIntoId, a.MailTo, a.IsService)
+        {
+            IsAgent = a.IsAgent,
+        };
 }
 
 public sealed record IdentityDto(

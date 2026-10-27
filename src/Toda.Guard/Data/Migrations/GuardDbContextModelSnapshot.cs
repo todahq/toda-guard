@@ -47,6 +47,9 @@ namespace Toda.Guard.Data.Migrations
                     b.Property<string>("Email")
                         .HasColumnType("text");
 
+                    b.Property<bool>("IsAgent")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsService")
                         .HasColumnType("boolean");
 
@@ -100,7 +103,10 @@ namespace Toda.Guard.Data.Migrations
                     b.HasIndex("NormalizedUsername")
                         .IsUnique();
 
-                    b.ToTable("accounts", "guard");
+                    b.ToTable("accounts", "guard", t =>
+                        {
+                            t.HasCheckConstraint("CK_accounts_agent_is_service", "NOT \"IsAgent\" OR \"IsService\"");
+                        });
                 });
 
             modelBuilder.Entity("Toda.Guard.Domain.AccountEmail", b =>
