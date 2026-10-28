@@ -12,10 +12,51 @@ namespace Toda.Guard.Services;
 /// user with no password and no address, projected into an account marked as a service account, or an agent's.
 /// </summary>
 [ExposeServices(typeof(IServiceAccounts), typeof(ServiceAccountMaker))]
-public class ServiceAccountMaker(GuardDb guardDb, AccountProjector projector, SecurityLog audit, IGuardEventSink events) : IServiceAccounts, ITransientDependency
+public class ServiceAccountMaker(GuardDb guardDb, AccountProjector projector, SecurityLog audit, IGuardEventSink events, PersonalTokens tokens, ActingContext acting)
+    : IServiceAccounts, ITransientDependency
 {
     public async Task<AccountInfo> CreateAsync(ServiceAccountInput input, CancellationToken cancellationToken = default) =>
         AccountLookup.ToInfo((await MakeAsync(input, cancellationToken)).Account);
+
+    public async Task<NewServiceAccountToken> CreateTokenAsync(ServiceAccountTokenInput input, CancellationToken cancellationToken = default)
+    {
+        await TokenHolderAsync(input.AccountId, mustBeActive: true, cancellationToken);
+        NewPersonalTokenDto made = await tokens.CreateAsync(input.AccountId,
+            new CreatePersonalTokenInput(input.Name, input.Access, input.ResourceIds?.ToList(), input.Days, input.Tools?.ToList()),
+            acting.SubjectId ?? input.AccountId, cancellationToken);
+        return new NewServiceAccountToken(Info(made.Token), made.Secret);
+    }
+
+    public async Task<IReadOnlyList<ServiceAccountTokenInfo>> ListTokensAsync(Guid accountId, bool all = false, CancellationToken cancellationToken = default)
+    {
+        await TokenHolderAsync(accountId, mustBeActive: false, cancellationToken);
+        return [.. (await tokens.ListAsync(accountId, activeOnly: !all, cancellationToken)).Select(Info)];
+    }
+
+    public async Task RevokeTokenAsync(Guid accountId, Guid tokenId, CancellationToken cancellationToken = default)
+    {
+        await TokenHolderAsync(accountId, mustBeActive: false, cancellationToken);
+        await tokens.RevokeAsync(tokenId, accountId, acting.SubjectId ?? accountId, cancellationToken);
+    }
+
+    /// <summary>A service account that holds tokens: not an agent's, and active to be given one. Else not found, or refused.</summary>
+    private Task TokenHolderAsync(Guid accountId, bool mustBeActive, CancellationToken cancellationToken) => guardDb.RunAsync(async db =>
+    {
+        Account account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId && a.IsService, cancellationToken)
+            ?? throw new Volo.Abp.Domain.Entities.EntityNotFoundException(typeof(Account), accountId);
+        if (account.IsAgent)
+        {
+            throw new UserFriendlyException($"{account.Username} is an agent's account, which holds no tokens.");
+        }
+
+        if (mustBeActive && account.Status != AccountStatus.Active)
+        {
+            throw new UserFriendlyException($"{account.Username} isn't active, so it can't have tokens.");
+        }
+    }, cancellationToken: cancellationToken);
+
+    private static ServiceAccountTokenInfo Info(PersonalTokenDto t) => new(t.Id, t.AccountId, t.Name, t.Prefix, t.Access, t.ExpiresAt, t.CreatedAt,
+        t.LastUsedAt, t.RevokedAt, t.Active, t.Projects?.Select(p => p.Id).ToList(), t.Tools);
 
     /// <summary>
     /// Makes the account and publishes what changed, in one unit of work: the account, its audit entry and its events

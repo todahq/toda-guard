@@ -266,6 +266,45 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
         Assert.Equal(3L, (long)(await count.ExecuteScalarAsync())!);
     }
 
+    [Fact]
+    public async Task The_host_gives_a_service_account_a_token_and_takes_it_back_but_not_an_agents()
+    {
+        HttpClient http = Client();
+        using IServiceScope scope = _factory!.Services.CreateScope();
+        IServiceAccounts accounts = scope.ServiceProvider.GetRequiredService<IServiceAccounts>();
+        AccountInfo robot = await accounts.CreateAsync(new ServiceAccountInput("robot"));
+        AccountInfo agent = await accounts.CreateAsync(new ServiceAccountInput("helper") { Agent = true });
+
+        NewServiceAccountToken made = await accounts.CreateTokenAsync(new ServiceAccountTokenInput(robot.Id, "deploys", 7) { Access = "read" });
+        Assert.StartsWith(made.Token.Prefix, made.Secret);
+        Assert.Equal(("deploys", "read", true), (made.Token.Name, made.Token.Access, made.Token.Active));
+        using HttpRequestMessage me = new(HttpMethod.Get, "/api/guard/me");
+        me.Headers.Authorization = new("Bearer", made.Secret);
+        HttpResponseMessage known = await http.SendAsync(me);
+        Assert.Equal(HttpStatusCode.OK, known.StatusCode);
+        using (JsonDocument body = JsonDocument.Parse(await known.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal("robot", body.RootElement.GetProperty("account").GetProperty("username").GetString());
+        }
+
+        Assert.Single(await accounts.ListTokensAsync(robot.Id));
+        await Assert.ThrowsAsync<Volo.Abp.UserFriendlyException>(() => accounts.CreateTokenAsync(new ServiceAccountTokenInput(agent.Id, "no", 7)));
+        await Assert.ThrowsAsync<Volo.Abp.UserFriendlyException>(() => accounts.CreateTokenAsync(new ServiceAccountTokenInput(robot.Id, "", 7)));
+
+        await accounts.RevokeTokenAsync(robot.Id, made.Token.Id);
+        using HttpRequestMessage again = new(HttpMethod.Get, "/api/guard/me");
+        again.Headers.Authorization = new("Bearer", made.Secret);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.SendAsync(again)).StatusCode);
+        Assert.Empty(await accounts.ListTokensAsync(robot.Id));
+        Assert.Single(await accounts.ListTokensAsync(robot.Id, all: true));
+
+        // Audited as the admin page's are.
+        await using NpgsqlConnection connection = new($"{Server};Database={_database}");
+        await connection.OpenAsync();
+        await using NpgsqlCommand audit = new("SELECT string_agg(\"Type\", ',' ORDER BY \"Time\") FROM guard.security_events WHERE \"TargetName\" = 'robot' AND \"Type\" LIKE 'token.%'", connection);
+        Assert.Equal("token.created,token.revoked", await audit.ExecuteScalarAsync());
+    }
+
     private static async Task AssertErrorAsync(HttpResponseMessage response, HttpStatusCode status, string code)
     {
         Assert.Equal(status, response.StatusCode);
