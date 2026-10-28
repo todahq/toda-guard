@@ -85,7 +85,8 @@ Some host pieces are folded in rather than given a seam:
 
 - ModuleDb becomes `GuardDb`, and key storage is inlined.
 - `SqlLike` is copied in, internal.
-- The error codes and admin policy keep **the same strings**: `Toda:Forbidden`, `step_up_required`, `TodaAdmin`.
+- The error codes and admin policy kept **the same strings** at first (`Toda:Forbidden`, `step_up_required`,
+  `TodaAdmin`); since the Toda rename they are Guard's own (see the amendment below).
 - `PersonalAccessToken.ProjectIds` becomes `ResourceIds`, on the same column, so no migration is needed.
 - Claim names don't change.
 
@@ -174,6 +175,26 @@ is committed or left in the shared checkout for it.
   - `AddGuardKeyRing` can take a certificate.
 
   Whoever starts a step says which files first, so it lands before the S6 freeze or in the new repository.
+
+### Amendment, 29 Oct 2026: Toda Guard
+
+The app is now called Toda, and Guard goes public first as Toda Guard (github.com/todahq/toda-guard, NuGet
+`Toda.Guard*`). Guard's defaults become Toda's; Toda keeps every name its sites already hold until its own rename:
+
+- **Names in one place:** `GuardNames` (`Guard:Names`) holds what Guard writes into tokens, headers, stored rows and
+  protected data: the acting claims, the anti-forgery header and salt, the token, app id and secret prefixes, the app
+  properties, the read scope, the second step's grant type, the Data Protection purposes' prefix and the imported
+  directories' salt. With `GuardOptions` (cookies, clients, API scope, seeded names, product name) it defaults to
+  Toda's.
+- **Toda pins its own:** `Toda.Guard.Integration`'s `TodaGuardNames` sets them before Guard reads its settings, and a
+  test writes each value out. Toda's rename moves each one with whatever already holds it. The Data Protection
+  purposes stay as they are for good, since they guard stored secrets.
+- **Changed now, as nothing outside a server holds them:** Guard's error codes (`Toda:Forbidden`,
+  `Toda:TooManyRequests`; `step_up_required` is unchanged), the admin policy (`TodaAdmin`) and the authentication
+  schemes, and the personal-data schema's id (`urn:toda:guard.personal-data@1`). Toda's own refusals keep
+  `Toda:Forbidden` and `Toda:TooManyRequests`, which its status finder maps beside Guard's.
+- **Texts name the host:** Guard's messages and status reasons name the product from `Texts.ProductName`, so Toda's
+  read as before.
 
 ## Consequences
 

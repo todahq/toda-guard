@@ -122,7 +122,7 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
         using HttpRequestMessage export = new(HttpMethod.Post, "/api/guard/me/data-export") { Content = JsonContent.Create(new { }) };
         export.Headers.Add("Accept", "*/*");
         export.Headers.Authorization = new("Bearer", token.RootElement.GetProperty("secret").GetString());
-        await AssertErrorAsync(await bearer.SendAsync(export), HttpStatusCode.Forbidden, "Toda:Forbidden");
+        await AssertErrorAsync(await bearer.SendAsync(export), HttpStatusCode.Forbidden, GuardErrorCodes.Forbidden);
 
         // The phone's web view follows redirects: a refused handoff still goes to sign-in, not to a JSON error.
         using HttpRequestMessage handoff = new(HttpMethod.Get, "/api/guard/session/handoff?code=not-a-code&next=/projects");

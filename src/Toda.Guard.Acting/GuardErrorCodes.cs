@@ -6,8 +6,9 @@ using Volo.Abp.Modularity;
 namespace Toda.Guard;
 
 /// <summary>
-/// The error codes Guard answers with (ADR 0087), the same strings Toda has always used, so clients see no change: a
-/// refusal, a step-up needed (with <c>maxAgeSeconds</c> in the error's data), and too many tries.
+/// The error codes Guard answers with (ADR 0087): a refusal, a step-up needed (with <c>maxAgeSeconds</c> in the error's
+/// data), and too many tries. Clients tell them apart by status and by <c>step_up_required</c>; the others' names are
+/// Guard's own.
 /// </summary>
 public static class GuardErrorCodes
 {
