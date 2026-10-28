@@ -217,7 +217,7 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
             HttpResponseMessage asked = await factory.CreateClient().PostAsJsonAsync("/api/guard/session", new { username = "admin", password = AdminPassword });
             Assert.Equal(HttpStatusCode.Unauthorized, asked.StatusCode);
             using JsonDocument body = JsonDocument.Parse(await asked.Content.ReadAsStringAsync());
-            Assert.Equal(["app", "recovery"], body.RootElement.GetProperty("secondFactor").GetProperty("methods").EnumerateArray().Select(m => m.GetString()).ToArray());
+            Assert.Equal(["app", "recovery"], body.RootElement.GetProperty("secondFactor").GetProperty("methods").EnumerateArray().Select(m => m.GetString()!).ToArray());
         }
         finally
         {

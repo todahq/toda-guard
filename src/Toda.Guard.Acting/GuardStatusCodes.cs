@@ -19,6 +19,8 @@ namespace Toda.Guard;
 [DisableConventionalRegistration]
 public class GuardHttpExceptionStatusCodeFinder(IOptions<AbpExceptionHttpStatusCodeOptions> options) : DefaultHttpExceptionStatusCodeFinder(options)
 {
+    private readonly AbpExceptionHttpStatusCodeOptions _mappings = options.Value;
+
     public override HttpStatusCode GetStatusCode(HttpContext httpContext, Exception exception)
     {
         if (exception is IHasErrorCode { Code: { } code })
@@ -46,7 +48,7 @@ public class GuardHttpExceptionStatusCodeFinder(IOptions<AbpExceptionHttpStatusC
 
     /// <summary>Whether the exception's code is one the host mapped to a status itself.</summary>
     private bool HostMapped(Exception exception) =>
-        exception is IHasErrorCode { Code: { Length: > 0 } code } && options.Value.ErrorCodeToHttpStatusCodeMappings.ContainsKey(code);
+        exception is IHasErrorCode { Code: { Length: > 0 } code } && _mappings.ErrorCodeToHttpStatusCodeMappings.ContainsKey(code);
 
     /// <summary>Uses Guard's finder when the host still has ABP's default one; a host's own finder stays.</summary>
     public static void UseUnlessTheHostHasItsOwn(IServiceCollection services)
