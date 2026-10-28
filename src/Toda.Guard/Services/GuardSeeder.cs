@@ -9,7 +9,10 @@ using Volo.Abp.DependencyInjection;
 
 namespace Toda.Guard.Services;
 
-/// <summary>Creates the internal directory, the first admin, and the toda-admins and toda-users groups.</summary>
+/// <summary>
+/// Creates the internal directory, the first admin, the admins and users groups (toda-admins and toda-users in Toda,
+/// GuardOptions.Seed and AdminsGroupName in a host), and the sign-up settings.
+/// </summary>
 public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfiguration configuration, IHostEnvironment environment,
     Microsoft.Extensions.Options.IOptions<GuardOptions> options, ILogger<GuardSeeder> logger)
     : ITransientDependency
@@ -27,9 +30,10 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
 
     private Task SeedTablesAsync(CancellationToken cancellationToken) => guardDb.RunAsync(async db =>
     {
+        GuardSeedOptions seed = options.Value.Seed;
         if (!await db.Directories.AnyAsync(d => d.Id == GuardConstants.InternalDirectoryId, cancellationToken))
         {
-            db.Directories.Add(new UserDirectory(GuardConstants.InternalDirectoryId, "Toda internal", GuardConstants.InternalType, order: 0));
+            db.Directories.Add(new UserDirectory(GuardConstants.InternalDirectoryId, seed.InternalDirectoryName, GuardConstants.InternalType, order: 0));
         }
 
         string adminPassword = configuration["Guard:Seed:AdminPassword"]
@@ -38,20 +42,22 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
         {
             DirectoryUser admin = new(Guid.NewGuid(), GuardConstants.InternalDirectoryId, "internal:admin", "admin")
             {
-                DisplayName = "Toda Administrator",
-                Email = "admin@toda.local",
+                DisplayName = seed.AdminDisplayName,
+                Email = seed.AdminEmail,
             };
             admin.PasswordHash = AuthService.HashPassword(admin, adminPassword);
             db.DirectoryUsers.Add(admin);
         }
 
-        await EnsureGroupAsync(db, GuardConstants.AdminsGroupId, options.Value.AdminsGroupName, "Toda administrators. Members, direct or nested, can administer Toda.", cancellationToken);
-        await EnsureGroupAsync(db, GuardConstants.UsersGroupId, "toda-users", "Everyone who may sign in to Toda.", cancellationToken);
+        await EnsureGroupAsync(db, GuardConstants.AdminsGroupId, options.Value.AdminsGroupName, seed.AdminsGroupDescription, cancellationToken);
+        await EnsureGroupAsync(db, GuardConstants.UsersGroupId, seed.UsersGroupName, seed.UsersGroupDescription, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await DirectoryGroups.EnsureAsync(db, cancellationToken);
         if (!await db.SignUpSettings.AnyAsync(s => s.Id == SignUpSettings.SiteId, cancellationToken))
         {
-            db.SignUpSettings.Add(new SignUpSettings(SignUpSettings.SiteId));
+            // Closed, or open into the internal directory when the host says so (Guard:SignUp:Open). Once: an admin's
+            // later choice stays.
+            db.SignUpSettings.Add(SelfService.Initial(options.Value.SignUp));
         }
 
         await db.SaveChangesAsync(cancellationToken);

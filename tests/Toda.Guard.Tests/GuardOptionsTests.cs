@@ -16,6 +16,45 @@ public class GuardOptionsTests
     }
 
     [Fact]
+    public void Sign_up_starts_closed_and_the_seed_has_Todas_names_unless_the_host_says()
+    {
+        GuardOptions toda = Bound();
+        Assert.False(toda.SignUp.Open);
+        Assert.Equal(("Toda Administrator", "admin@toda.local", "Toda internal", "toda-users", "Everyone who may sign in to Toda."),
+            (toda.Seed.AdminDisplayName, toda.Seed.AdminEmail, toda.Seed.InternalDirectoryName, toda.Seed.UsersGroupName, toda.Seed.UsersGroupDescription));
+        Assert.Equal("Toda administrators. Members, direct or nested, can administer Toda.", toda.Seed.AdminsGroupDescription);
+        Assert.False(Services.SelfService.Initial(toda.SignUp).Enabled);
+
+        GuardOptions host = Bound(("Guard:SignUp:Open", "true"), ("Guard:Seed:UsersGroupName", "market-users"), ("Guard:Seed:AdminPassword", "x"));
+        Assert.True(host.SignUp.Open);
+        Assert.Equal("market-users", host.Seed.UsersGroupName);
+        Domain.SignUpSettings open = Services.SelfService.Initial(host.SignUp);
+        Assert.True(open.Enabled);
+        Assert.Equal(GuardConstants.InternalDirectoryId, open.DirectoryId);
+        Assert.Null(Services.SelfService.Initial(toda.SignUp).DirectoryId);
+    }
+
+    [Fact]
+    public void The_authenticators_issuer_is_Todas_as_before_unless_the_host_names_it()
+    {
+        Assert.Equal("Toda (toda.example)", Services.TwoFactor.SecondFactors.IssuerFor(new GuardOptions { PublicUrl = "https://toda.example" }));
+        Assert.Equal("Toda", Services.TwoFactor.SecondFactors.IssuerFor(new GuardOptions()));
+        GuardOptions market = Bound(("Guard:PublicUrl", "https://market.example"), ("Guard:Texts:ProductName:en", "Market"));
+        Assert.Equal("Market (market.example)", Services.TwoFactor.SecondFactors.IssuerFor(market));
+        Assert.Equal("Acme", Services.TwoFactor.SecondFactors.IssuerFor(Bound(("Guard:TwoFactor:Issuer", "Acme"), ("Guard:PublicUrl", "https://x.example"))));
+        Assert.False(new GuardOptions().TwoFactor.ListsRecovery);
+        Assert.True(Bound(("Guard:TwoFactor:ListsRecovery", "true")).TwoFactor.ListsRecovery);
+    }
+
+    [Fact]
+    public void A_mailed_links_page_takes_the_language_where_it_says_lang()
+    {
+        Assert.Equal("https://toda.example/reset-password", GuardPageOptions.Link("https://toda.example", "/reset-password", "ar"));
+        Assert.Equal("https://market.example/ar/reset-password", GuardPageOptions.Link("https://market.example", "/{lang}/reset-password", "ar"));
+        Assert.Equal("https://market.example/en/signup/verify", GuardPageOptions.Link("https://market.example", "/{lang}/signup/verify", null));
+    }
+
+    [Fact]
     public void Guard_needs_ABPs_clock_in_UTC_and_says_so_otherwise()
     {
         Assert.Null(TodaGuardModule.ClockProblem(new Volo.Abp.Timing.AbpClockOptions { Kind = DateTimeKind.Utc }));

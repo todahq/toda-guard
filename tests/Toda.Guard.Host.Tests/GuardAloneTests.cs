@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
@@ -59,6 +60,12 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
     [Fact]
     public async Task Someone_signs_up_confirms_signs_in_and_is_known()
     {
+        // Toda's defaults: sign-up starts closed.
+        using (JsonDocument closed = JsonDocument.Parse(await Client().GetStringAsync("/api/guard/signup")))
+        {
+            Assert.False(closed.RootElement.GetProperty("enabled").GetBoolean());
+        }
+
         HttpClient admin = Client();
         string csrf = await SignInAsync(admin, "admin", AdminPassword);
 
@@ -123,6 +130,119 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
         HttpResponseMessage redirected = await Client().SendAsync(handoff);
         Assert.Equal(HttpStatusCode.Redirect, redirected.StatusCode);
         Assert.Equal("/login?next=%2Fprojects", redirected.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
+    public async Task A_host_opens_sign_up_and_names_what_it_seeds_and_an_admins_choice_stays()
+    {
+        (string Key, string Value)[] host =
+        [
+            ("Guard__SignUp__Open", "true"), ("Guard__Seed__InternalDirectoryName", "Market accounts"), ("Guard__Seed__UsersGroupName", "market-users"),
+            ("Guard__Seed__UsersGroupDescription", "Everyone with a market account."), ("Guard__Seed__AdminDisplayName", "Market admin"),
+            ("Guard__Seed__AdminEmail", "admin@market.example"),
+        ];
+        try
+        {
+            foreach ((string key, string value) in host)
+            {
+                Environment.SetEnvironmentVariable(key, value);
+            }
+
+            await using (WebApplicationFactory<Program> first = new())
+            {
+                HttpClient visitor = first.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+                using JsonDocument open = JsonDocument.Parse(await visitor.GetStringAsync("/api/guard/signup"));
+                Assert.True(open.RootElement.GetProperty("enabled").GetBoolean());
+
+                await using NpgsqlConnection connection = new($"{Server};Database={_database}");
+                await connection.OpenAsync();
+                await using NpgsqlCommand names = new(
+                    "SELECT (SELECT \"Name\" FROM guard.directories WHERE \"Id\" = '00000000-0000-0000-0000-00000000d001') || '|' || "
+                    + "(SELECT \"Name\" || '|' || coalesce(\"Description\", '') FROM guard.groups WHERE \"Name\" = 'market-users') || '|' || "
+                    + "(SELECT \"DisplayName\" || '|' || \"Email\" FROM guard.accounts WHERE \"Username\" = 'admin')", connection);
+                Assert.Equal("Market accounts|market-users|Everyone with a market account.|Market admin|admin@market.example", await names.ExecuteScalarAsync());
+
+                // An admin closes it: that choice stays when the site starts again with the same settings.
+                HttpClient admin = first.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true, AllowAutoRedirect = false });
+                string csrf = await SignInAsync(admin, "admin", AdminPassword);
+                using HttpRequestMessage close = new(HttpMethod.Put, "/api/guard/signup/settings")
+                {
+                    Content = JsonContent.Create(new { enabled = false, directoryId = (Guid?)null, emailDomains = Array.Empty<string>() }),
+                };
+                close.Headers.Add("X-Toda-Csrf", csrf);
+                Assert.Equal(HttpStatusCode.OK, (await admin.SendAsync(close)).StatusCode);
+            }
+
+            await using WebApplicationFactory<Program> again = new();
+            using JsonDocument closed = JsonDocument.Parse(await again.CreateClient().GetStringAsync("/api/guard/signup"));
+            Assert.False(closed.RootElement.GetProperty("enabled").GetBoolean());
+        }
+        finally
+        {
+            foreach ((string key, _) in host)
+            {
+                Environment.SetEnvironmentVariable(key, null);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task The_authenticator_names_the_product_and_the_second_step_lists_recovery_when_the_host_says()
+    {
+        (string Key, string Value)[] host = [("Guard__TwoFactor__ListsRecovery", "true"), ("Guard__Texts__ProductName__en", "Market")];
+        try
+        {
+            foreach ((string key, string value) in host)
+            {
+                Environment.SetEnvironmentVariable(key, value);
+            }
+
+            await using WebApplicationFactory<Program> factory = new();
+            HttpClient admin = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true, AllowAutoRedirect = false });
+            string csrf = await SignInAsync(admin, "admin", AdminPassword);
+            using HttpRequestMessage start = new(HttpMethod.Post, "/api/guard/me/second-factors/app");
+            start.Headers.Add("X-Toda-Csrf", csrf);
+            HttpResponseMessage started = await admin.SendAsync(start);
+            Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+            using JsonDocument app = JsonDocument.Parse(await started.Content.ReadAsStringAsync());
+            Assert.Contains("issuer=Market%20%28localhost%29", app.RootElement.GetProperty("address").GetString());
+
+            string code = Services.TwoFactor.Totp.Code(Services.TwoFactor.Totp.FromBase32(app.RootElement.GetProperty("secret").GetString()!),
+                Services.TwoFactor.Totp.StepAt(DateTimeOffset.UtcNow));
+            using HttpRequestMessage confirm = new(HttpMethod.Post, "/api/guard/me/second-factors/app/confirm") { Content = JsonContent.Create(new { code }) };
+            confirm.Headers.Add("X-Toda-Csrf", csrf);
+            Assert.Equal(HttpStatusCode.OK, (await admin.SendAsync(confirm)).StatusCode);
+
+            // Signing in again asks for the second step: the app, and the recovery codes the person now has.
+            HttpResponseMessage asked = await factory.CreateClient().PostAsJsonAsync("/api/guard/session", new { username = "admin", password = AdminPassword });
+            Assert.Equal(HttpStatusCode.Unauthorized, asked.StatusCode);
+            using JsonDocument body = JsonDocument.Parse(await asked.Content.ReadAsStringAsync());
+            Assert.Equal(["app", "recovery"], body.RootElement.GetProperty("secondFactor").GetProperty("methods").EnumerateArray().Select(m => m.GetString()).ToArray());
+        }
+        finally
+        {
+            foreach ((string key, _) in host)
+            {
+                Environment.SetEnvironmentVariable(key, null);
+            }
+        }
+    }
+
+    [Fact]
+    public void A_code_the_host_mapped_keeps_its_status_and_a_refused_input_is_400()
+    {
+        // The host maps its own code to 403, as the marketplace does: Guard's finder keeps it, and still answers 400 for
+        // input a rule refused.
+        using WebApplicationFactory<Program> host = _factory!.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.Configure<Volo.Abp.AspNetCore.ExceptionHandling.AbpExceptionHttpStatusCodeOptions>(o => o.Map("Host:Forbidden", HttpStatusCode.Forbidden))));
+        using IServiceScope scope = host.Services.CreateScope();
+        Volo.Abp.AspNetCore.ExceptionHandling.IHttpExceptionStatusCodeFinder finder =
+            scope.ServiceProvider.GetRequiredService<Volo.Abp.AspNetCore.ExceptionHandling.IHttpExceptionStatusCodeFinder>();
+        Microsoft.AspNetCore.Http.DefaultHttpContext http = new();
+
+        Assert.Equal(HttpStatusCode.Forbidden, finder.GetStatusCode(http, new Volo.Abp.BusinessException("Host:Forbidden")));
+        Assert.Equal(HttpStatusCode.BadRequest, finder.GetStatusCode(http, new Volo.Abp.UserFriendlyException("Passwords need at least 10 characters.")));
+        Assert.Equal(HttpStatusCode.Forbidden, finder.GetStatusCode(http, new Volo.Abp.UserFriendlyException("Confirm.", GuardErrorCodes.StepUpRequired)));
     }
 
     [Fact]

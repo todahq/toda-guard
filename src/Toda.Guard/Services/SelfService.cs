@@ -109,6 +109,8 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
     private ITimeLimitedDataProtector Resetter => protection.CreateProtector("Toda.Guard.Password.Reset").ToTimeLimitedDataProtector();
     private string Site => (options.Value.PublicUrl ?? "http://localhost:3000").TrimEnd('/');
 
+    private string SiteLanguage => options.Value.Site.Languages.FirstOrDefault() ?? "en";
+
     public Task<SignUpSettingsDto> SettingsAsync(CancellationToken ct) => guardDb.RunAsync(async db =>
     {
         SignUpSettings s = await LoadAsync(db, ct);
@@ -219,7 +221,9 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         }, requiresNew: true, ct, isTransactional: true);
 
         string token = Verifier.Protect(user.Id.ToString("N"), VerifyFor);
-        await SendAsync(SelfServiceMail.Verify, user, new Dictionary<string, object?> { ["link"] = $"{Site}{options.Value.Pages.SignUpVerify}#token={token}", ["hours"] = (int)VerifyFor.TotalHours }, ct);
+        // The link in the language the person signed up in.
+        string link = GuardPageOptions.Link(Site, options.Value.Pages.SignUpVerify, siteDefaults.RequestLanguage);
+        await SendAsync(SelfServiceMail.Verify, user, new Dictionary<string, object?> { ["link"] = $"{link}#token={token}", ["hours"] = (int)VerifyFor.TotalHours }, ct);
     }
 
     /// <summary>Confirms a sign-up's email: the account becomes active, and joins organizations by its domain. Returns its username.</summary>
@@ -319,20 +323,26 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
             return;
         }
 
-        List<DirectoryUser> users = await guardDb.RunAsync(async db =>
+        (List<DirectoryUser> users, Dictionary<Guid, string?> languages) = await guardDb.RunAsync(async db =>
         {
             List<Guid> internalDirectories = await db.Directories.Where(d => d.Type == GuardConstants.InternalType && d.IsActive).Select(d => d.Id).ToListAsync(ct);
             List<Guid> owners = await Addresses.ActiveWithAddress(db, normalized).Where(a => a.DirectoryUserId != null).Select(a => a.DirectoryUserId!.Value).ToListAsync(ct);
-            return await db.DirectoryUsers.AsNoTracking()
+            List<DirectoryUser> users = await db.DirectoryUsers.AsNoTracking()
                 .Where(u => internalDirectories.Contains(u.DirectoryId) && u.IsActive && u.PendingSince == null && owners.Contains(u.Id))
                 .ToListAsync(ct);
+            List<Guid> ids = users.Select(u => u.Id).ToList();
+            Dictionary<Guid, string?> languages = await db.Accounts.AsNoTracking().Where(a => a.DirectoryUserId != null && ids.Contains(a.DirectoryUserId.Value))
+                .ToDictionaryAsync(a => a.DirectoryUserId!.Value, a => a.Language, ct);
+            return (users, languages);
         }, cancellationToken: ct);
 
         foreach (DirectoryUser user in users)
         {
             string token = Resetter.Protect($"{user.Id:N}:{Stamp(user)}", ResetFor);
+            // The link in the account's language, else the site's.
+            string link = GuardPageOptions.Link(Site, options.Value.Pages.PasswordReset, languages.GetValueOrDefault(user.Id) ?? SiteLanguage);
             await SendAsync(SelfServiceMail.Reset, user,
-                new Dictionary<string, object?> { ["username"] = user.Username, ["link"] = $"{Site}{options.Value.Pages.PasswordReset}#token={token}", ["minutes"] = (int)ResetFor.TotalMinutes }, ct,
+                new Dictionary<string, object?> { ["username"] = user.Username, ["link"] = $"{link}#token={token}", ["minutes"] = (int)ResetFor.TotalMinutes }, ct,
                 to: address); // the address asked for: the directory's or one the account verified (ADR 0044)
         }
     }
@@ -393,8 +403,15 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         }
     }
 
-    private static async Task<SignUpSettings> LoadAsync(GuardDbContext db, CancellationToken ct) =>
-        await db.SignUpSettings.FirstOrDefaultAsync(s => s.Id == SignUpSettings.SiteId, ct) ?? db.SignUpSettings.Add(new SignUpSettings(SignUpSettings.SiteId)).Entity;
+    private async Task<SignUpSettings> LoadAsync(GuardDbContext db, CancellationToken ct) =>
+        await db.SignUpSettings.FirstOrDefaultAsync(s => s.Id == SignUpSettings.SiteId, ct) ?? db.SignUpSettings.Add(Initial(options.Value.SignUp)).Entity;
+
+    /// <summary>The site's sign-up settings before an admin chooses: closed, or open into the internal directory.</summary>
+    public static SignUpSettings Initial(GuardSignUpOptions defaults) => new(SignUpSettings.SiteId)
+    {
+        Enabled = defaults.Open,
+        DirectoryId = defaults.Open ? GuardConstants.InternalDirectoryId : null,
+    };
 }
 
 /// <summary>

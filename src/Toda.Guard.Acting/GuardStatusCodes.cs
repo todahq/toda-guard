@@ -13,8 +13,8 @@ namespace Toda.Guard;
 /// <summary>
 /// The statuses Guard's errors answer with (ADR 0087), for a host that hasn't chosen its own: a refusal or a step-up
 /// needed is 403, too many tries 429, and a business rule that says no to the input (a taken username, a short password,
-/// a bad link) 400, where ABP's default would answer 403 and make it look like a permission problem. Toda has its own
-/// finder that does the same, and keeps it.
+/// a bad link) 400, where ABP's default would answer 403 and make it look like a permission problem; a code the host
+/// mapped itself keeps the host's status. Toda has its own finder that does the same, and keeps it.
 /// </summary>
 [DisableConventionalRegistration]
 public class GuardHttpExceptionStatusCodeFinder(IOptions<AbpExceptionHttpStatusCodeOptions> options) : DefaultHttpExceptionStatusCodeFinder(options)
@@ -33,14 +33,20 @@ public class GuardHttpExceptionStatusCodeFinder(IOptions<AbpExceptionHttpStatusC
             }
         }
 
+        // A refused input is 400, where ABP's default would answer 403: for Guard's own codes and codes no one mapped. A
+        // code the host mapped itself (AbpExceptionHttpStatusCodeOptions) keeps the host's status, 403 included.
         if (exception is UserFriendlyException or BusinessException && exception is not Volo.Abp.Authorization.AbpAuthorizationException)
         {
             HttpStatusCode mapped = base.GetStatusCode(httpContext, exception);
-            return mapped == HttpStatusCode.Forbidden ? HttpStatusCode.BadRequest : mapped;
+            return mapped == HttpStatusCode.Forbidden && !HostMapped(exception) ? HttpStatusCode.BadRequest : mapped;
         }
 
         return base.GetStatusCode(httpContext, exception);
     }
+
+    /// <summary>Whether the exception's code is one the host mapped to a status itself.</summary>
+    private bool HostMapped(Exception exception) =>
+        exception is IHasErrorCode { Code: { Length: > 0 } code } && options.Value.ErrorCodeToHttpStatusCodeMappings.ContainsKey(code);
 
     /// <summary>Uses Guard's finder when the host still has ABP's default one; a host's own finder stays.</summary>
     public static void UseUnlessTheHostHasItsOwn(IServiceCollection services)

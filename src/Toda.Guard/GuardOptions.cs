@@ -46,6 +46,63 @@ public sealed class GuardOptions
 
     /// <summary>The product's name in Guard's messages, and a host's own templates for them; Toda's texts by default.</summary>
     public GuardTextOptions Texts { get; set; } = new();
+
+    /// <summary>Whether sign-up starts open (Guard:SignUp:Open); closed by default, as Toda's is.</summary>
+    public GuardSignUpOptions SignUp { get; set; } = new();
+
+    /// <summary>The names the first start seeds with (Guard:Seed:*): the admin, the internal directory, the two groups.</summary>
+    public GuardSeedOptions Seed { get; set; } = new();
+
+    /// <summary>Two-factor sign-in (Guard:TwoFactor:*): the authenticator app's issuer, and what the second step lists.</summary>
+    public GuardTwoFactorOptions TwoFactor { get; set; } = new();
+}
+
+/// <summary>
+/// Two-factor sign-in's settings a host gives (ADR 0082). Guard:TwoFactor:Disabled, the emergency switch, stays a
+/// setting of its own.
+/// </summary>
+public sealed class GuardTwoFactorOptions
+{
+    /// <summary>
+    /// The name authenticator apps show for the site, and the sent codes name. Null: the product's English name
+    /// (Texts.ProductName) and the site's host, "Toda (toda.example)" in Toda. One name in every language, as an app's
+    /// entry stays as it was set up.
+    /// </summary>
+    public string? Issuer { get; set; }
+
+    /// <summary>
+    /// Whether the second step lists "recovery" among the methods when the person has recovery codes left. Off by
+    /// default, so the methods are the person's factors and the codes the site sends, as Toda's clients read them.
+    /// </summary>
+    public bool ListsRecovery { get; set; }
+}
+
+/// <summary>
+/// Sign-up when the site is first set up (ADR 0037): open, into the internal directory, or closed until an admin opens
+/// it. It's the default only: once an admin chooses on the sign-up settings, their choice stays.
+/// </summary>
+public sealed class GuardSignUpOptions
+{
+    public bool Open { get; set; }
+}
+
+/// <summary>
+/// What the first start makes, by name (Toda's names by default). Made once: renaming them later is an admin's, and
+/// changing these settings after doesn't. The admin's password is Guard:Seed:AdminPassword, read only at that start.
+/// </summary>
+public sealed class GuardSeedOptions
+{
+    public string AdminDisplayName { get; set; } = "Toda Administrator";
+
+    public string AdminEmail { get; set; } = "admin@toda.local";
+
+    public string InternalDirectoryName { get; set; } = "Toda internal";
+
+    public string AdminsGroupDescription { get; set; } = "Toda administrators. Members, direct or nested, can administer Toda.";
+
+    public string UsersGroupName { get; set; } = "toda-users";
+
+    public string UsersGroupDescription { get; set; } = "Everyone who may sign in to Toda.";
 }
 
 /// <summary>
@@ -64,9 +121,16 @@ public sealed class GuardCookieOptions
     public string Language { get; set; } = "NEXT_LOCALE";
 }
 
-/// <summary>The host's pages, as paths on its public address: where mailed links and the OAuth consent go.</summary>
+/// <summary>
+/// The host's pages, as paths on its public address: where mailed links and the OAuth consent go. A path may hold
+/// <c>{lang}</c> (/{lang}/reset-password): a mailed link has the recipient's language there, else the site's first.
+/// </summary>
 public sealed class GuardPageOptions
 {
+    /// <summary>The page's address on the site, its {lang} the language given (else en).</summary>
+    public static string Link(string site, string path, string? language) =>
+        site + path.Replace("{lang}", Uri.EscapeDataString(language is { Length: > 0 } ? language : "en"), StringComparison.Ordinal);
+
     public string SignUpVerify { get; set; } = "/signup/verify";
 
     public string PasswordReset { get; set; } = "/reset-password";

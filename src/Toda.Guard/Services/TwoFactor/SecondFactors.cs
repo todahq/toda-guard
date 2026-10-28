@@ -120,6 +120,13 @@ public sealed class SecondFactors(
             bool strong = mode == TwoFactorModes.Strong;
             List<SecondFactorSenderDto> senders = strong ? [] : await SendersAsync(db, account, cancellationToken);
             List<string> methods = [.. kinds.Where(k => !strong || SecondFactorKinds.IsStrong(k)).Order(StringComparer.Ordinal), .. senders.Select(s => s.Method)];
+            // Recovery codes stand in for a factor; listed only where the host's clients read them (GuardOptions.TwoFactor).
+            if (options.Value.TwoFactor.ListsRecovery && methods.Count > 0
+                && await db.RecoveryCodes.AnyAsync(c => c.AccountId == accountId && c.UsedAt == null, cancellationToken))
+            {
+                methods.Add(SecondFactorKinds.Recovery);
+            }
+
             string ticket = Secret();
             SignInTicket row = new(Guid.NewGuid(), accountId, Hash(ticket), client, scopes, ip);
             db.SignInTickets.Add(row);
@@ -590,8 +597,23 @@ public sealed class SecondFactors(
 
     private static string WrongKey(Guid accountId) => $"second-factor|u:{accountId:N}";
 
-    private string Issuer => configuration["Guard:TwoFactor:Issuer"] is { Length: > 0 } issuer ? issuer
-        : Uri.TryCreate(options.Value.PublicUrl, UriKind.Absolute, out Uri? site) ? $"Toda ({site.Host})" : "Toda";
+    private string Issuer => IssuerFor(options.Value);
+
+    /// <summary>
+    /// The authenticator app's issuer: Guard:TwoFactor:Issuer, else the product's English name and the site's host
+    /// ("Toda (toda.example)" in Toda), else the name alone.
+    /// </summary>
+    public static string IssuerFor(GuardOptions options)
+    {
+        if (options.TwoFactor.Issuer is { Length: > 0 } issuer)
+        {
+            return issuer;
+        }
+
+        string product = options.Texts.ProductName.TryGetValue("en", out string? english) && english is { Length: > 0 } ? english
+            : options.Texts.ProductName.Values.FirstOrDefault(n => n is { Length: > 0 }) ?? GuardMessageTemplates.DefaultProductName;
+        return Uri.TryCreate(options.PublicUrl, UriKind.Absolute, out Uri? site) ? $"{product} ({site.Host})" : product;
+    }
 
     private static string QrPng(string text)
     {

@@ -24,6 +24,23 @@ public class StatusCodesTests
     }
 
     [Fact]
+    public void A_code_the_host_mapped_keeps_the_hosts_status()
+    {
+        AbpExceptionHttpStatusCodeOptions mappings = new();
+        mappings.Map("Host:Forbidden", HttpStatusCode.Forbidden);
+        mappings.Map("Host:Conflict", HttpStatusCode.Conflict);
+        GuardHttpExceptionStatusCodeFinder finder = new(Options.Create(mappings));
+        HttpContext http = new DefaultHttpContext();
+
+        Assert.Equal(HttpStatusCode.Forbidden, finder.GetStatusCode(http, new BusinessException("Host:Forbidden")));
+        Assert.Equal(HttpStatusCode.Forbidden, finder.GetStatusCode(http, new UserFriendlyException("Not yours.", "Host:Forbidden")));
+        Assert.Equal(HttpStatusCode.Conflict, finder.GetStatusCode(http, new BusinessException("Host:Conflict")));
+        // A code no one mapped is still a refused input.
+        Assert.Equal(HttpStatusCode.BadRequest, finder.GetStatusCode(http, new BusinessException("Host:Unmapped")));
+        Assert.Equal(HttpStatusCode.BadRequest, finder.GetStatusCode(http, new UserFriendlyException("Passwords need at least 10 characters.")));
+    }
+
+    [Fact]
     public void Guards_finder_replaces_only_ABPs_default()
     {
         ServiceCollection plain = new();

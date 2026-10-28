@@ -188,7 +188,8 @@ public class AccountEmailService(GuardDb guardDb, IDataProtectionProvider protec
             {
                 ["address"] = row.Email,
                 ["username"] = account.Username,
-                ["link"] = $"{Site}{options.Value.Pages.AddressVerify}#token={token}",
+                // The link in the account's language, else the site's.
+                ["link"] = $"{GuardPageOptions.Link(Site, options.Value.Pages.AddressVerify, account.Language ?? options.Value.Site.Languages.FirstOrDefault())}#token={token}",
                 ["hours"] = (int)VerifyFor.TotalHours,
             }, account.Language ?? siteDefaults.RequestLanguage, "address-verify"), ct);
         return await ListAsync(accountId, ct);
