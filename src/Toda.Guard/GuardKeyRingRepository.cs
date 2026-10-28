@@ -96,4 +96,21 @@ public static class GuardKeyRingExtensions
                 ?? throw new InvalidOperationException("AddGuardKeyRing needs ConnectionStrings:Guard or ConnectionStrings:Default.")));
         return builder;
     }
+
+    /// <summary>
+    /// The same, with the keys encrypted at rest by a certificate: a copy of the table, or a backup of the database, is
+    /// then no use without the certificate's private key. Off unless a host calls this; every server needs the same
+    /// certificate, and keeps it as long as any key it encrypted (a replaced certificate is passed again to read old keys:
+    /// Data Protection's UnprotectKeysWithAnyCertificate).
+    /// </summary>
+    public static IDataProtectionBuilder AddGuardKeyRing(this IDataProtectionBuilder builder, System.Security.Cryptography.X509Certificates.X509Certificate2 certificate)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+        if (!certificate.HasPrivateKey)
+        {
+            throw new ArgumentException("The key ring's certificate needs its private key, to read the keys it encrypts.", nameof(certificate));
+        }
+
+        return builder.AddGuardKeyRing().ProtectKeysWithCertificate(certificate).UnprotectKeysWithAnyCertificate(certificate);
+    }
 }

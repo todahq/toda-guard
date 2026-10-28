@@ -81,7 +81,8 @@ public class TodaGuardModule : AbpModule
         // Sign-in: OpenIddict issues short-lived access tokens and rotating refresh tokens to the
         // first-party Next.js server; APIs validate them locally (ADR 0007).
         // Their keys (ADR 0050): certificates, a folder mounted from a secret store, or Postgres (made once, shared by every node).
-        string dataRoot = Path.GetFullPath(configuration["Toda:DataRoot"] ?? Path.Combine(context.Services.GetHostingEnvironment().ContentRootPath, "App_Data"));
+        // Where the key files of before are looked for (ADR 0050): Guard:DataRoot, else Toda's Toda:DataRoot as before.
+        string dataRoot = Path.GetFullPath(DataRoot(configuration) ?? Path.Combine(context.Services.GetHostingEnvironment().ContentRootPath, "App_Data"));
         (SecurityKey signingKey, SecurityKey encryptionKey) = OidcKeys.Resolve(configuration, dataRoot);
 
         context.Services.AddDbContext<OidcDbContext>(options =>
@@ -173,6 +174,10 @@ public class TodaGuardModule : AbpModule
         context.Services.AddHostedService<DirectorySyncScheduler>();
         context.Services.AddHostedService<SecurityAuditRetention>();
     }
+
+    /// <summary>Guard's data folder: Guard:DataRoot, else Toda:DataRoot (what Toda's deployments set), else none.</summary>
+    public static string? DataRoot(IConfiguration configuration) =>
+        configuration["Guard:DataRoot"] is { Length: > 0 } guard ? guard : configuration["Toda:DataRoot"] is { Length: > 0 } toda ? toda : null;
 
     /// <summary>Why Guard can't run with ABP's clock as the host set it, or null: it needs UTC.</summary>
     public static string? ClockProblem(Volo.Abp.Timing.AbpClockOptions clock) => clock.Kind == DateTimeKind.Utc ? null

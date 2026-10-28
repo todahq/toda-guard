@@ -42,11 +42,13 @@ public class GuardDbContext(DbContextOptions<GuardDbContext> options) : AbpDbCon
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
+        // Stored inside account_merges.Steps as JSON, never as entities of their own: ignored before ABP's base maps
+        // every entity type found so far, or EF warns that MergeStep was mapped and then ignored.
+        builder.Ignore<MergeStep>();
+        builder.Ignore<MergeStepCount>();
         base.OnModelCreating(builder);
         builder.HasDefaultSchema(Schema);
         builder.ConfigureEventOutbox();
-        builder.Ignore<MergeStep>(); // stored inside account_merges.Steps as JSON, never as entities of their own
-        builder.Ignore<MergeStepCount>();
 
         builder.Entity<UserDirectory>(b =>
         {

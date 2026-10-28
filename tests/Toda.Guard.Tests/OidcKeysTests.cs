@@ -14,6 +14,14 @@ public sealed class OidcKeysTests : IDisposable
     private static IConfiguration Config(params (string Key, string Value)[] settings) =>
         new ConfigurationBuilder().AddInMemoryCollection(settings.Select(s => KeyValuePair.Create(s.Key, (string?)s.Value))).Build();
 
+    [Fact]
+    public void Guards_data_folder_is_Guard_DataRoot_else_Todas_as_before()
+    {
+        Assert.Equal("/guard", TodaGuardModule.DataRoot(Config(("Guard:DataRoot", "/guard"), ("Toda:DataRoot", "/data"))));
+        Assert.Equal("/data", TodaGuardModule.DataRoot(Config(("Toda:DataRoot", "/data"))));
+        Assert.Null(TodaGuardModule.DataRoot(Config()));
+    }
+
     private string Pfx(string name)
     {
         Directory.CreateDirectory(_root);
