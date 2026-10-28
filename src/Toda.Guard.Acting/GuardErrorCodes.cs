@@ -28,13 +28,17 @@ public static class GuardErrorCodes
 [DependsOn(typeof(AbpAspNetCoreMvcModule))]
 public class TodaGuardActingModule : AbpModule
 {
-    public override void ConfigureServices(ServiceConfigurationContext context) =>
+    public override void ConfigureServices(ServiceConfigurationContext context)
+    {
         Configure<AbpExceptionHttpStatusCodeOptions>(options =>
         {
             options.Map(GuardErrorCodes.Forbidden, System.Net.HttpStatusCode.Forbidden);
             options.Map(GuardErrorCodes.StepUpRequired, System.Net.HttpStatusCode.Forbidden);
             options.Map(GuardErrorCodes.TooManyRequests, System.Net.HttpStatusCode.TooManyRequests);
         });
+        // The names Guard writes into tokens, cookies and stored data (Guard:Names), as a host gives them.
+        context.Services.Configure<GuardNames>(context.Services.GetConfiguration().GetSection(GuardNames.Section));
+    }
 
     /// <summary>After every module has registered its services: Guard's status finder, unless the host has its own.</summary>
     public override void PostConfigureServices(ServiceConfigurationContext context) =>

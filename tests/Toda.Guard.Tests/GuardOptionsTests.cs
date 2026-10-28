@@ -55,6 +55,19 @@ public class GuardOptionsTests
     }
 
     [Fact]
+    public void Guards_names_bind_from_Guard_Names_and_name_its_protection_purposes()
+    {
+        IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            [new("Guard:Names:ProtectionPrefix", "Acme.Guard"), new("Guard:Names:TokenClaim", "acme_token")]).Build();
+        GuardNames names = new();
+        configuration.GetSection(GuardNames.Section).Bind(names);
+
+        Assert.Equal("acme_token", names.TokenClaim);
+        Assert.Equal("Acme.Guard.SecondFactor.v1", names.Purpose("SecondFactor.v1"));
+        Assert.Equal(new GuardNames().CsrfHeader, names.CsrfHeader);
+    }
+
+    [Fact]
     public void Guard_needs_ABPs_clock_in_UTC_and_says_so_otherwise()
     {
         Assert.Null(TodaGuardModule.ClockProblem(new Volo.Abp.Timing.AbpClockOptions { Kind = DateTimeKind.Utc }));

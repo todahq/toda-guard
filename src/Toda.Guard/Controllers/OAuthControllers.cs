@@ -84,11 +84,11 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb, IOptions<G
         }
 
         // Reading only unless the person chose to let it change things too, and never more than the app asked for.
-        string access = request.GetParameter(AccessParameter)?.ToString() == TokenAccess.Write && !request.HasScope(OAuthAgents.ReadScope)
+        string access = request.GetParameter(AccessParameter)?.ToString() == TokenAccess.Write && !request.HasScope(WebSessionHandler.Wire(HttpContext).ReadScope)
             ? TokenAccess.Write
             : TokenAccess.Read;
         string authorizationId = await apps.AllowAsync(accountId, request.ClientId!, access, OAuthAgents.GrantedScopes(options.Value.ApiScope), cancellationToken);
-        return SignIn(AppPrincipals.For(account, authorizationId, access, OAuthAgents.GrantedScopes(options.Value.ApiScope)), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        return SignIn(AppPrincipals.For(account, authorizationId, access, OAuthAgents.GrantedScopes(options.Value.ApiScope), WebSessionHandler.Wire(HttpContext)), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 
     private ForbidResult Refuse(string error, string description) =>
@@ -102,14 +102,14 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb, IOptions<G
 /// <summary>The claims an app's tokens carry: the person, the permission (as the token's id, so it can't step up), and its access.</summary>
 public static class AppPrincipals
 {
-    public static ClaimsPrincipal For(Account account, string authorizationId, string access, IEnumerable<string> scopes)
+    public static ClaimsPrincipal For(Account account, string authorizationId, string access, IEnumerable<string> scopes, GuardNames names)
     {
         ClaimsIdentity identity = new(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, Claims.Name, Claims.Role);
         identity.SetClaim(Claims.Subject, account.Id.ToString())
             .SetClaim(Claims.Name, account.Username)
             .SetClaim("display_name", account.DisplayName)
-            .SetClaim(ActingContext.TokenClaim, authorizationId)
-            .SetClaim(ActingContext.TokenAccessClaim, access);
+            .SetClaim(names.TokenClaim, authorizationId)
+            .SetClaim(names.TokenAccessClaim, access);
         identity.SetScopes(scopes);
         identity.SetAuthorizationId(authorizationId);
         identity.SetDestinations(_ => [Destinations.AccessToken]);

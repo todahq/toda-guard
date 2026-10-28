@@ -10,6 +10,7 @@ namespace Toda.Guard.Tests;
 public class WebSessionTests
 {
     private const string Secret = "k3y-0f-a-s3ss10n_with-enough-random-in-it-xyz";
+    private static readonly GuardNames Names = new();
 
     [Fact]
     public void A_bearer_token_wins_over_the_cookie()
@@ -28,16 +29,16 @@ public class WebSessionTests
     [Fact]
     public void The_anti_forgery_value_belongs_to_one_session()
     {
-        string csrf = WebSessions.CsrfFor(Secret);
-        Assert.Equal(csrf, WebSessions.CsrfFor(Secret));
-        Assert.NotEqual(csrf, WebSessions.CsrfFor(Secret + "x"));
+        string csrf = WebSessions.CsrfFor(Secret, Names);
+        Assert.Equal(csrf, WebSessions.CsrfFor(Secret, Names));
+        Assert.NotEqual(csrf, WebSessions.CsrfFor(Secret + "x", Names));
         Assert.NotEqual(WebSessions.Hash(Secret), csrf);
         Assert.DoesNotContain(Secret, csrf, StringComparison.Ordinal);
 
-        Assert.True(WebSessions.CsrfMatches(Secret, csrf));
-        Assert.False(WebSessions.CsrfMatches(Secret, WebSessions.CsrfFor("another session")));
-        Assert.False(WebSessions.CsrfMatches(Secret, ""));
-        Assert.False(WebSessions.CsrfMatches(Secret, null));
+        Assert.True(WebSessions.CsrfMatches(Secret, csrf, Names));
+        Assert.False(WebSessions.CsrfMatches(Secret, WebSessions.CsrfFor("another session", Names), Names));
+        Assert.False(WebSessions.CsrfMatches(Secret, "", Names));
+        Assert.False(WebSessions.CsrfMatches(Secret, null, Names));
     }
 
     [Theory]
@@ -91,7 +92,7 @@ public class WebSessionTests
         Assert.Contains("httponly", session, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=lax", session, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("httponly", csrf, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(WebSessions.CsrfFor(Secret), csrf, StringComparison.Ordinal);
+        Assert.Contains(WebSessions.CsrfFor(Secret, Names), csrf, StringComparison.Ordinal);
         Assert.DoesNotContain("secure", session, StringComparison.OrdinalIgnoreCase);
 
         DefaultHttpContext https = new();

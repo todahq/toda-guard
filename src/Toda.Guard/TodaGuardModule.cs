@@ -92,9 +92,15 @@ public class TodaGuardModule : AbpModule
             options.UseOpenIddict<Guid>();
         });
 
-        // The host's API scope (GuardOptions.ApiScope, toda.api by default), as the host configured it.
+        // The host's API scope (GuardOptions.ApiScope, toda.api by default), the read scope and the second step's grant
+        // (ADR 0082; GuardNames), as the host configured them.
         context.Services.AddOptions<OpenIddict.Server.OpenIddictServerOptions>()
-            .Configure<Microsoft.Extensions.Options.IOptions<GuardOptions>>((server, guard) => server.Scopes.Add(guard.Value.ApiScope));
+            .Configure<Microsoft.Extensions.Options.IOptions<GuardOptions>, Microsoft.Extensions.Options.IOptions<GuardNames>>((server, guard, names) =>
+            {
+                server.Scopes.Add(guard.Value.ApiScope);
+                server.Scopes.Add(names.Value.ReadScope);
+                server.GrantTypes.Add(names.Value.SecondFactorGrantType);
+            });
         context.Services.AddOpenIddict()
             .AddCore(options => options.UseEntityFrameworkCore().UseDbContext<OidcDbContext>().ReplaceDefaultEntities<Guid>())
             .AddServer(options =>
@@ -103,9 +109,8 @@ public class TodaGuardModule : AbpModule
                     .SetRevocationEndpointUris("connect/revoke")
                     // Apps and agents (M7): the authorization code flow, always with PKCE, behind a consent page.
                     .SetAuthorizationEndpointUris("connect/authorize");
-                options.AllowPasswordFlow().AllowRefreshTokenFlow().AllowAuthorizationCodeFlow().RequireProofKeyForCodeExchange()
-                    .AllowCustomFlow(Controllers.TokenController.SecondFactorGrant); // the second step (ADR 0082)
-                options.RegisterScopes(OpenIddictConstants.Scopes.OfflineAccess, OAuthAgents.ReadScope);
+                options.AllowPasswordFlow().AllowRefreshTokenFlow().AllowAuthorizationCodeFlow().RequireProofKeyForCodeExchange();
+                options.RegisterScopes(OpenIddictConstants.Scopes.OfflineAccess);
                 // Revoking the phone app's (or a script's) refresh token ends its whole sign-in (ADR 0075).
                 options.AddEventHandler(EndSignInOnRevocation.Descriptor);
                 // MCP clients register themselves (RFC 7591) at the endpoint the discovery document names.

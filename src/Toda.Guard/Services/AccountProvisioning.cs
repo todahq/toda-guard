@@ -14,7 +14,7 @@ namespace Toda.Guard.Services;
 /// </summary>
 [ExposeServices(typeof(IAccountProvisioning))]
 public class AccountProvisioning(GuardDb guardDb, AccountProjector projector, IMembershipResolver membership, IGuardEventSink events,
-    AccountMergeService merges, SecurityLog audit) : IAccountProvisioning, ITransientDependency
+    AccountMergeService merges, SecurityLog audit, Microsoft.Extensions.Options.IOptions<GuardNames> names) : IAccountProvisioning, ITransientDependency
 {
     public async Task<ProvisionedAccount> EnsureInternalAccountAsync(Guid callerId, string username, string displayName, string? email, string? password,
         CancellationToken cancellationToken = default)
@@ -118,7 +118,7 @@ public class AccountProvisioning(GuardDb guardDb, AccountProjector projector, IM
                 }
             }
 
-            Guid directoryId = DirectoryIdFor(source);
+            Guid directoryId = DirectoryIdFor(source, names.Value);
             if (!await db.Directories.AnyAsync(d => d.Id == directoryId, cancellationToken))
             {
                 int last = await db.Directories.MaxAsync(d => (int?)d.Order, cancellationToken) ?? 0;
@@ -140,6 +140,6 @@ public class AccountProvisioning(GuardDb guardDb, AccountProjector projector, IM
     }
 
     /// <summary>One directory per source, with an id derived from its name, so reruns and other importers share it.</summary>
-    public static Guid DirectoryIdFor(string source) =>
-        new(SHA256.HashData(Encoding.UTF8.GetBytes("toda-imported-directory:" + source.Trim().ToLowerInvariant()))[..16]);
+    public static Guid DirectoryIdFor(string source, GuardNames names) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes(names.ImportedDirectorySalt + source.Trim().ToLowerInvariant()))[..16]);
 }

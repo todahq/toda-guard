@@ -100,13 +100,13 @@ public static class SelfServiceMail
 /// </summary>
 [ExposeServices(typeof(SelfService), typeof(ICustomerAccounts))]
 public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IGuardMessenger messenger, IGuardSiteDefaults siteDefaults, IOptions<GuardOptions> options,
-    IGuardEventSink events, AccountMergeService merges, SecurityLog audit) : ITransientDependency, ICustomerAccounts
+    IGuardEventSink events, AccountMergeService merges, SecurityLog audit, IOptions<GuardNames> names) : ITransientDependency, ICustomerAccounts
 {
     public static readonly TimeSpan VerifyFor = TimeSpan.FromHours(72);
     public static readonly TimeSpan ResetFor = TimeSpan.FromHours(1);
 
-    private ITimeLimitedDataProtector Verifier => protection.CreateProtector("Toda.Guard.SignUp.Verify").ToTimeLimitedDataProtector();
-    private ITimeLimitedDataProtector Resetter => protection.CreateProtector("Toda.Guard.Password.Reset").ToTimeLimitedDataProtector();
+    private ITimeLimitedDataProtector Verifier => protection.CreateProtector(names.Value.Purpose("SignUp.Verify")).ToTimeLimitedDataProtector();
+    private ITimeLimitedDataProtector Resetter => protection.CreateProtector(names.Value.Purpose("Password.Reset")).ToTimeLimitedDataProtector();
     private string Site => (options.Value.PublicUrl ?? "http://localhost:3000").TrimEnd('/');
 
     private string SiteLanguage => options.Value.Site.Languages.FirstOrDefault() ?? "en";

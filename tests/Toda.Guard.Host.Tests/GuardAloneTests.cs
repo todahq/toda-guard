@@ -74,7 +74,7 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
         {
             Content = JsonContent.Create(new { enabled = true, directoryId = "00000000-0000-0000-0000-00000000d001", emailDomains = Array.Empty<string>() }),
         };
-        open.Headers.Add("X-Toda-Csrf", csrf);
+        open.Headers.Add(CsrfHeader, csrf);
         Assert.Equal(HttpStatusCode.OK, (await admin.SendAsync(open)).StatusCode);
 
         // A switched-off feature (the sample has no directories to sync) has no endpoints.
@@ -114,7 +114,7 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
         {
             Content = JsonContent.Create(new { name = "download", access = "write", projectIds = (Guid[]?)null, days = 7 }),
         };
-        create.Headers.Add("X-Toda-Csrf", csrf);
+        create.Headers.Add(CsrfHeader, csrf);
         HttpResponseMessage made = await admin.SendAsync(create);
         Assert.Equal(HttpStatusCode.OK, made.StatusCode);
         using JsonDocument token = JsonDocument.Parse(await made.Content.ReadAsStringAsync());
@@ -169,7 +169,7 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
                 {
                     Content = JsonContent.Create(new { enabled = false, directoryId = (Guid?)null, emailDomains = Array.Empty<string>() }),
                 };
-                close.Headers.Add("X-Toda-Csrf", csrf);
+                close.Headers.Add(CsrfHeader, csrf);
                 Assert.Equal(HttpStatusCode.OK, (await admin.SendAsync(close)).StatusCode);
             }
 
@@ -201,7 +201,7 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
             HttpClient admin = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true, AllowAutoRedirect = false });
             string csrf = await SignInAsync(admin, "admin", AdminPassword);
             using HttpRequestMessage start = new(HttpMethod.Post, "/api/guard/me/second-factors/app");
-            start.Headers.Add("X-Toda-Csrf", csrf);
+            start.Headers.Add(CsrfHeader, csrf);
             HttpResponseMessage started = await admin.SendAsync(start);
             Assert.Equal(HttpStatusCode.OK, started.StatusCode);
             using JsonDocument app = JsonDocument.Parse(await started.Content.ReadAsStringAsync());
@@ -210,7 +210,7 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
             string code = Services.TwoFactor.Totp.Code(Services.TwoFactor.Totp.FromBase32(app.RootElement.GetProperty("secret").GetString()!),
                 Services.TwoFactor.Totp.StepAt(DateTimeOffset.UtcNow));
             using HttpRequestMessage confirm = new(HttpMethod.Post, "/api/guard/me/second-factors/app/confirm") { Content = JsonContent.Create(new { code }) };
-            confirm.Headers.Add("X-Toda-Csrf", csrf);
+            confirm.Headers.Add(CsrfHeader, csrf);
             Assert.Equal(HttpStatusCode.OK, (await admin.SendAsync(confirm)).StatusCode);
 
             // Signing in again asks for the second step: the app, and the recovery codes the person now has.
@@ -218,6 +218,47 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
             Assert.Equal(HttpStatusCode.Unauthorized, asked.StatusCode);
             using JsonDocument body = JsonDocument.Parse(await asked.Content.ReadAsStringAsync());
             Assert.Equal(["app", "recovery"], body.RootElement.GetProperty("secondFactor").GetProperty("methods").EnumerateArray().Select(m => m.GetString()!).ToArray());
+        }
+        finally
+        {
+            foreach ((string key, _) in host)
+            {
+                Environment.SetEnvironmentVariable(key, null);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task The_names_Guard_writes_are_the_hosts()
+    {
+        // A host names its anti-forgery header and its tokens' prefix (Guard:Names): Guard asks for and recognises those.
+        (string Key, string Value)[] host = [("Guard__Names__CsrfHeader", "X-Acme-Csrf"), ("Guard__Names__PersonalTokenPrefix", "acme_pat_")];
+        try
+        {
+            foreach ((string key, string value) in host)
+            {
+                Environment.SetEnvironmentVariable(key, value);
+            }
+
+            await using WebApplicationFactory<Program> factory = new();
+            HttpClient admin = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true, AllowAutoRedirect = false });
+            string csrf = await SignInAsync(admin, "admin", AdminPassword);
+            object body = new { name = "acme", access = "read", projectIds = (Guid[]?)null, days = 7 };
+            using HttpRequestMessage refused = new(HttpMethod.Post, "/api/guard/me/tokens") { Content = JsonContent.Create(body) };
+            refused.Headers.Add(CsrfHeader, csrf);
+            Assert.Equal(HttpStatusCode.Forbidden, (await admin.SendAsync(refused)).StatusCode);
+
+            using HttpRequestMessage create = new(HttpMethod.Post, "/api/guard/me/tokens") { Content = JsonContent.Create(body) };
+            create.Headers.Add("X-Acme-Csrf", csrf);
+            HttpResponseMessage made = await admin.SendAsync(create);
+            Assert.Equal(HttpStatusCode.OK, made.StatusCode);
+            using JsonDocument token = JsonDocument.Parse(await made.Content.ReadAsStringAsync());
+            string secret = token.RootElement.GetProperty("secret").GetString()!;
+            Assert.StartsWith("acme_pat_", secret);
+
+            using HttpRequestMessage me = new(HttpMethod.Get, "/api/guard/me");
+            me.Headers.Authorization = new("Bearer", secret);
+            Assert.Equal(HttpStatusCode.OK, (await factory.CreateClient().SendAsync(me)).StatusCode);
         }
         finally
         {
@@ -315,18 +356,19 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
 
     private HttpClient Client() => _factory!.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true, AllowAutoRedirect = false });
 
-    /// <summary>Signs in with the web's session cookie; the anti-forgery value the page would read from toda_csrf.</summary>
-    private static async Task<string> SignInAsync(HttpClient client, string username, string password)
+    /// <summary>The anti-forgery header, Guard's default name, as the sample host leaves it.</summary>
+    private static readonly string CsrfHeader = new GuardNames().CsrfHeader;
+
+    /// <summary>Signs in with the web's session cookie; the anti-forgery value the page would read from its cookie.</summary>
+    private static async Task<string> SignInAsync(HttpClient client, string username, string password, string? csrfCookie = null)
     {
         HttpResponseMessage signedIn = await client.PostAsJsonAsync("/api/guard/session", new { username, password });
         Assert.Equal(HttpStatusCode.OK, signedIn.StatusCode);
-        string csrf = signedIn.Headers.GetValues("Set-Cookie").Select(c => Csrf().Match(c)).First(m => m.Success).Groups[1].Value;
-        return Uri.UnescapeDataString(csrf);
+        string prefix = (csrfCookie ?? new GuardCookieOptions().Csrf) + "=";
+        string cookie = signedIn.Headers.GetValues("Set-Cookie").First(c => c.StartsWith(prefix, StringComparison.Ordinal));
+        return Uri.UnescapeDataString(cookie[prefix.Length..].Split(';')[0]);
     }
 
     [GeneratedRegex(@"token=([A-Za-z0-9_\-%.]+)", RegexOptions.None, 1000)]
     private static partial Regex Token();
-
-    [GeneratedRegex(@"^toda_csrf=([^;]+)", RegexOptions.None, 1000)]
-    private static partial Regex Csrf();
 }

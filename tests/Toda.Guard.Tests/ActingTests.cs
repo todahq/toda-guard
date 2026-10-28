@@ -36,7 +36,7 @@ public partial class ActingTests
     public void An_act_claim_names_the_actor()
     {
         ActingContext acting = Acting(new Claim("sub", Subject.ToString()), new Claim(ActingContext.ActClaim, $"{{\"sub\":\"{Actor}\"}}"),
-            new Claim(ActingContext.ModeClaim, ActingModes.Impersonation));
+            new Claim(new GuardNames().ModeClaim, ActingModes.Impersonation));
         Assert.Equal(Subject, acting.SubjectId);
         Assert.Equal(Actor, acting.ActorId);
         Assert.Equal(ActingModes.Impersonation, acting.Mode);

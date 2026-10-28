@@ -36,10 +36,10 @@ public sealed record CreatePersonalTokenInput(string Name, string Access, List<G
 /// Personal access tokens (M7): made, listed, revoked, and found by their secret. A token is <c>toda_pat_</c> and 43
 /// random characters; only its SHA-256 is kept.
 /// </summary>
-public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGrantScopeDescriber> describers, ITokenRestrictions restrictions)
+public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGrantScopeDescriber> describers, ITokenRestrictions restrictions,
+    IOptions<GuardNames> names)
     : ITransientDependency
 {
-    public const string SecretPrefix = "toda_pat_";
 
     public static string Hash(string secret) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(secret))).ToLowerInvariant();
 
@@ -86,7 +86,8 @@ public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGra
         }
 
         byte[] random = RandomNumberGenerator.GetBytes(32);
-        string secret = SecretPrefix + Base64UrlEncoder(random);
+        string prefix = names.Value.PersonalTokenPrefix;
+        string secret = prefix + Base64UrlEncoder(random);
         (PersonalAccessToken token, Account account) = await guardDb.RunAsync(async db =>
         {
             Account account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId, cancellationToken)
@@ -103,7 +104,7 @@ public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGra
                 throw new UserFriendlyException($"Tokens on this site live 1 to {maxDays} days.");
             }
 
-            PersonalAccessToken token = new(Guid.NewGuid(), accountId, name, secret[..(SecretPrefix.Length + 4)], Hash(secret), input.Access, projects,
+            PersonalAccessToken token = new(Guid.NewGuid(), accountId, name, secret[..(prefix.Length + 4)], Hash(secret), input.Access, projects,
                 DateTime.UtcNow.AddDays(input.Days), createdBy, limitedTo);
             db.PersonalAccessTokens.Add(token);
             audit.Add(db, SecurityAuditTypes.TokenCreated, new AuditTarget("Account", account.Id, account.Username),
@@ -230,7 +231,7 @@ public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOpt
 
     /// <summary>Whether a request's bearer token is a personal access token (it goes to this handler, not to OpenIddict).</summary>
     public static bool Carries(Microsoft.AspNetCore.Http.HttpRequest request) =>
-        request.Headers.Authorization.ToString() is { } header && header.StartsWith("Bearer " + PersonalTokens.SecretPrefix, StringComparison.Ordinal);
+        request.Headers.Authorization.ToString() is { } header && header.StartsWith("Bearer " + WebSessionHandler.Wire(request.HttpContext).PersonalTokenPrefix, StringComparison.Ordinal);
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -249,16 +250,17 @@ public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOpt
         identity.AddClaim(new Claim("sub", found.Account.Id.ToString()));
         identity.AddClaim(new Claim("name", found.Account.Username));
         identity.AddClaim(new Claim("display_name", found.Account.DisplayName));
-        identity.AddClaim(new Claim(ActingContext.TokenClaim, found.Token.Id.ToString()));
-        identity.AddClaim(new Claim(ActingContext.TokenAccessClaim, found.Token.Access));
+        GuardNames claims = WebSessionHandler.Wire(Context);
+        identity.AddClaim(new Claim(claims.TokenClaim, found.Token.Id.ToString()));
+        identity.AddClaim(new Claim(claims.TokenAccessClaim, found.Token.Access));
         foreach (string tool in found.Token.Tools ?? [])
         {
-            identity.AddClaim(new Claim(ActingContext.TokenToolClaim, tool));
+            identity.AddClaim(new Claim(claims.TokenToolClaim, tool));
         }
 
         foreach (Guid project in found.Token.ResourceIds ?? [])
         {
-            identity.AddClaim(new Claim(ActingContext.TokenProjectClaim, project.ToString()));
+            identity.AddClaim(new Claim(claims.TokenProjectClaim, project.ToString()));
         }
 
         return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));

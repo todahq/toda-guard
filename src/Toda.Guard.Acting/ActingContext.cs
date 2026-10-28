@@ -23,31 +23,15 @@ public static class ActingModes
 /// only a subject. Worked out once per request from the access token, and the only place that reads who the token is
 /// for: everything else asks this, so a token's limits can't be skipped.
 /// </summary>
-public sealed class ActingContext(IHttpContextAccessor http) : IScopedDependency
+public sealed class ActingContext(IHttpContextAccessor http, Microsoft.Extensions.Options.IOptions<GuardNames>? names = null) : IScopedDependency
 {
     /// <summary>The claim that names the actor (RFC 8693): a JSON object whose <c>sub</c> is the actor's account id.</summary>
     public const string ActClaim = "act";
 
-    /// <summary>The claim with the impersonation session a token belongs to.</summary>
-    public const string SessionClaim = "toda_session";
-
-    /// <summary>The claim with the mode an actor acts in.</summary>
-    public const string ModeClaim = "toda_mode";
-
     /// <summary>When the person last proved who they are, in seconds since 1970 (OpenID Connect's claim).</summary>
     public const string AuthTimeClaim = "auth_time";
 
-    /// <summary>The personal access token a request came with (its id), set only by the token's own sign-in.</summary>
-    public const string TokenClaim = "toda_token";
-
-    /// <summary>A personal access token's access: <c>read</c> or <c>write</c>.</summary>
-    public const string TokenAccessClaim = "toda_token_access";
-
-    /// <summary>A project a personal access token is limited to; one claim each, none for every project.</summary>
-    public const string TokenProjectClaim = "toda_token_project";
-
-    /// <summary>A tool a personal access token is limited to (M7, ADR 0025); one claim each, none for every tool.</summary>
-    public const string TokenToolClaim = "toda_token_tool";
+    private readonly GuardNames _names = names?.Value ?? new GuardNames();
 
     private bool _read;
     private Guid? _subjectId;
@@ -125,7 +109,7 @@ public sealed class ActingContext(IHttpContextAccessor http) : IScopedDependency
                     && Guid.TryParse(sub.GetString(), out Guid actor))
                 {
                     _actorId = actor;
-                    _mode = user.FindFirstValue(ModeClaim) ?? ActingModes.Impersonation;
+                    _mode = user.FindFirstValue(_names.ModeClaim) ?? ActingModes.Impersonation;
                 }
             }
             catch (JsonException)
@@ -134,7 +118,7 @@ public sealed class ActingContext(IHttpContextAccessor http) : IScopedDependency
             }
         }
 
-        if (Guid.TryParse(user.FindFirstValue(SessionClaim), out Guid session))
+        if (Guid.TryParse(user.FindFirstValue(_names.SessionClaim), out Guid session))
         {
             _sessionId = session;
         }
@@ -144,13 +128,13 @@ public sealed class ActingContext(IHttpContextAccessor http) : IScopedDependency
             _authTime = DateTimeOffset.FromUnixTimeSeconds(seconds);
         }
 
-        if (Guid.TryParse(user.FindFirstValue(TokenClaim), out Guid token))
+        if (Guid.TryParse(user.FindFirstValue(_names.TokenClaim), out Guid token))
         {
             _tokenId = token;
-            _tokenReadOnly = user.FindFirstValue(TokenAccessClaim) != "write";
-            List<Guid> projects = user.FindAll(TokenProjectClaim).Select(c => Guid.TryParse(c.Value, out Guid id) ? id : Guid.Empty).ToList();
+            _tokenReadOnly = user.FindFirstValue(_names.TokenAccessClaim) != "write";
+            List<Guid> projects = user.FindAll(_names.TokenProjectClaim).Select(c => Guid.TryParse(c.Value, out Guid id) ? id : Guid.Empty).ToList();
             _tokenProjects = projects.Count == 0 ? null : projects;
-            List<string> tools = user.FindAll(TokenToolClaim).Select(c => c.Value).ToList();
+            List<string> tools = user.FindAll(_names.TokenToolClaim).Select(c => c.Value).ToList();
             _tokenTools = tools.Count == 0 ? null : tools;
         }
 

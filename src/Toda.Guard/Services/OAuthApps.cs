@@ -39,17 +39,9 @@ public sealed record ClientRegistrationInput(
 /// <summary>The scopes and properties of OAuth for agents (M7).</summary>
 public static class OAuthAgents
 {
-    /// <summary>Asks for reading only: the person can't allow more.</summary>
-    public const string ReadScope = "toda.read";
-
-    /// <summary>How an app came: it registered itself (an MCP client), or a site admin made it.</summary>
-    public const string KindProperty = "toda_kind";
-
+    /// <summary>How an app came (kept in GuardNames.AppKindProperty): it registered itself (an MCP client), or a site admin made it.</summary>
     public const string Registered = "registered";
     public const string Made = "admin";
-
-    /// <summary>What a person allowed an app: read, or read and write.</summary>
-    public const string AccessProperty = "toda_access";
 
     /// <summary>What an app a person allows is granted: the host's API (GuardOptions.ApiScope) and refreshing.</summary>
     public static ImmutableArray<string> GrantedScopes(string apiScope) => [apiScope, Scopes.OfflineAccess];
@@ -61,7 +53,7 @@ public static class OAuthAgents
 /// for other systems, public or confidential. A person sees and revokes the apps they've allowed.
 /// </summary>
 public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenIddictAuthorizationManager authorizations, IOpenIddictTokenManager tokens,
-    ISecurityAudit audit, IGuardRateLimits limits, IOptions<GuardOptions> options) : ITransientDependency
+    ISecurityAudit audit, IGuardRateLimits limits, IOptions<GuardOptions> options, IOptions<GuardNames> names) : ITransientDependency
 {
     private const int RegistrationsPerHour = 20;
 
@@ -102,7 +94,7 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
     {
         string name = Name(input.Name);
         List<Uri> redirects = RedirectUris(input.RedirectUris);
-        string? secret = input.Confidential ? "toda_cs_" + Base64Url(RandomNumberGenerator.GetBytes(32)) : null;
+        string? secret = input.Confidential ? names.Value.AppSecretPrefix + Base64Url(RandomNumberGenerator.GetBytes(32)) : null;
         object app = await applications.CreateAsync(Descriptor(GenerateClientId(), name, redirects, secret, OAuthAgents.Made), cancellationToken);
         OAuthAppDto dto = await ToDtoAsync(app, cancellationToken);
         await audit.WriteAsync(SecurityAuditTypes.OAuthAppCreated, new AuditTarget("OAuthApp", null, dto.ClientId),
@@ -156,7 +148,7 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
         foreach (object earlier in await All(authorizations.FindAsync(accountId.ToString(), appId, Statuses.Valid, AuthorizationTypes.Permanent, null, cancellationToken)))
         {
             ImmutableDictionary<string, JsonElement> given = await authorizations.GetPropertiesAsync(earlier, cancellationToken);
-            if (given.TryGetValue(OAuthAgents.AccessProperty, out JsonElement was) && was.GetString() == access)
+            if (given.TryGetValue(names.Value.AppAccessProperty, out JsonElement was) && was.GetString() == access)
             {
                 return (await authorizations.GetIdAsync(earlier, cancellationToken))!;
             }
@@ -171,7 +163,7 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
             Status = Statuses.Valid,
             Subject = accountId.ToString(),
             Type = AuthorizationTypes.Permanent,
-            Properties = { [OAuthAgents.AccessProperty] = JsonSerializer.SerializeToElement(access) },
+            Properties = { [names.Value.AppAccessProperty] = JsonSerializer.SerializeToElement(access) },
         }.WithScopes(scopes), cancellationToken);
         string id = (await authorizations.GetIdAsync(authorization, cancellationToken))!;
         await audit.WriteAsync(SecurityAuditTypes.OAuthConsentGranted, new AuditTarget("Account", accountId, null),
@@ -202,7 +194,7 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
 
             ImmutableDictionary<string, JsonElement> properties = await authorizations.GetPropertiesAsync(authorization, cancellationToken);
             grants.Add(new OAuthGrantDto((await authorizations.GetIdAsync(authorization, cancellationToken))!, app.ClientId, app.Name,
-                properties.TryGetValue(OAuthAgents.AccessProperty, out JsonElement access) ? access.GetString() ?? "read" : "read",
+                properties.TryGetValue(names.Value.AppAccessProperty, out JsonElement access) ? access.GetString() ?? "read" : "read",
                 await authorizations.GetCreationDateAsync(authorization, cancellationToken)));
         }
 
@@ -262,7 +254,7 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
         }
 
         return new OAuthAppDto((await applications.GetClientIdAsync(app, cancellationToken))!, (await applications.GetDisplayNameAsync(app, cancellationToken)) ?? "",
-            properties.TryGetValue(OAuthAgents.KindProperty, out JsonElement kind) ? kind.GetString() ?? OAuthAgents.Made : OAuthAgents.Made,
+            properties.TryGetValue(names.Value.AppKindProperty, out JsonElement kind) ? kind.GetString() ?? OAuthAgents.Made : OAuthAgents.Made,
             await applications.GetClientTypeAsync(app, cancellationToken) == ClientTypes.Confidential,
             [.. (await applications.GetRedirectUrisAsync(app, cancellationToken)).Order(StringComparer.Ordinal)], people);
     }
@@ -286,10 +278,10 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
                 Permissions.ResponseTypes.Code,
                 Permissions.Prefixes.Scope + options.Value.ApiScope,
                 Permissions.Prefixes.Scope + Scopes.OfflineAccess,
-                Permissions.Prefixes.Scope + OAuthAgents.ReadScope,
+                Permissions.Prefixes.Scope + names.Value.ReadScope,
             },
             Requirements = { Requirements.Features.ProofKeyForCodeExchange },
-            Properties = { [OAuthAgents.KindProperty] = JsonSerializer.SerializeToElement(kind) },
+            Properties = { [names.Value.AppKindProperty] = JsonSerializer.SerializeToElement(kind) },
         };
         foreach (Uri redirect in redirects)
         {
@@ -342,7 +334,7 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
 
     private static BusinessException Invalid(string message) => new("invalid_client_metadata", message);
 
-    private static string GenerateClientId() => "toda_app_" + Base64Url(RandomNumberGenerator.GetBytes(16));
+    private string GenerateClientId() => names.Value.AppIdPrefix + Base64Url(RandomNumberGenerator.GetBytes(16));
 
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }

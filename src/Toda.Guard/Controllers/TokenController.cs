@@ -24,7 +24,7 @@ namespace Toda.Guard.Controllers;
 /// and the new tokens start a new window; only Toda's own web server may ask, and too many failures end the session.
 /// A person whose groups ask for a second factor, or who set one up (ADR 0082), gets no tokens from the password alone:
 /// the answer is <c>second_factor_required</c> with a <c>ticket</c>, its <c>methods</c>, and <c>enrol</c> when they must
-/// set one up first; the ticket and a code then go through the grant <see cref="SecondFactorGrant"/>.
+/// set one up first; the ticket and a code then go through the second step's grant (GuardNames.SecondFactorGrantType).
 /// </summary>
 [ApiExplorerSettings(IgnoreApi = true)]
 [UnitOfWork(IsDisabled = true)]
@@ -32,8 +32,8 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
     IOptions<GuardOptions> options)
     : AbpControllerBase
 {
-    /// <summary>Toda's grant for the second step (ADR 0082): <c>ticket</c>, <c>method</c> and <c>code</c>.</summary>
-    public const string SecondFactorGrant = "urn:toda:grant-type:second-factor";
+    /// <summary>The grant type of the second step (ADR 0082), with <c>ticket</c>, <c>method</c> and <c>code</c>: GuardNames.SecondFactorGrantType.</summary>
+    private GuardNames Names => Services.WebSessionHandler.Wire(HttpContext);
 
     [HttpPost("~/connect/token")]
     [AllowAnonymous]
@@ -81,7 +81,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
         }
 
         // The second step (ADR 0082): the ticket from the password grant, for the same client, with a code.
-        if (request.GrantType == SecondFactorGrant)
+        if (request.GrantType == Names.SecondFactorGrantType)
         {
             Services.TwoFactor.SecondStepResult step = await secondFactors.PassAsync(request.GetParameter("ticket")?.ToString() ?? "",
                 request.GetParameter("method")?.ToString(), request.GetParameter("code")?.ToString(), request.ClientId ?? "",
@@ -118,7 +118,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
         if (request.IsRefreshTokenGrantType())
         {
             AuthenticateResult refreshed = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-            if (refreshed.Principal?.GetClaim(Toda.Guard.Acting.ActingContext.TokenClaim) is not null)
+            if (refreshed.Principal?.GetClaim(Names.TokenClaim) is not null)
             {
                 if (request.GetParameter(StepUpParameter) is not null)
                 {
@@ -205,8 +205,8 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
             return Refuse("The account is no longer active.");
         }
 
-        return SignIn(AppPrincipals.For(account, granted.GetAuthorizationId()!, granted.GetClaim(Toda.Guard.Acting.ActingContext.TokenAccessClaim) ?? TokenAccess.Read,
-            granted.GetScopes()), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        return SignIn(AppPrincipals.For(account, granted.GetAuthorizationId()!, granted.GetClaim(Names.TokenAccessClaim) ?? TokenAccess.Read,
+            granted.GetScopes(), Names), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 
     /// <summary>The token parameter that makes a refresh a step-up, with the password.</summary>

@@ -49,10 +49,10 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthori
     /// The anti-forgery value for a session: derived from its secret, so a page can only know it by reading the cookie
     /// the server set beside the session's, which another site can't.
     /// </summary>
-    public static string CsrfFor(string secret) => Base64Url(SHA256.HashData(Encoding.UTF8.GetBytes("toda-csrf:" + secret)));
+    public static string CsrfFor(string secret, GuardNames names) => Base64Url(SHA256.HashData(Encoding.UTF8.GetBytes(names.CsrfSalt + secret)));
 
-    public static bool CsrfMatches(string secret, string? header) =>
-        header is { Length: > 0 } && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(CsrfFor(secret)), Encoding.UTF8.GetBytes(header));
+    public static bool CsrfMatches(string secret, string? header, GuardNames names) =>
+        header is { Length: > 0 } && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(CsrfFor(secret, names)), Encoding.UTF8.GetBytes(header));
 
     /// <summary>
     /// A new session for an account that just proved who it is; the secret is the cookie's, never kept. A web view's
@@ -245,7 +245,8 @@ public class WebSessions(GuardDb guardDb, IMemoryCache cache, IOpenIddictAuthori
         await guardDb.RunAsync(db => db.SessionHandoffs.Where(h => h.ExpiresAt < dayAgo).ExecuteDeleteAsync(cancellationToken), requiresNew: true, cancellationToken: cancellationToken);
     }
 
-    internal static string Key(string hash) => "toda:web-session:" + hash;
+    /// <summary>Where this server remembers a session it read: its own memory, so the name is no one else's.</summary>
+    internal static string Key(string hash) => "guard:web-session:" + hash;
 
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }
@@ -259,7 +260,6 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "TodaSession";
-    public const string CsrfHeader = "X-Toda-Csrf";
 
     // The cookies' names are the host's (GuardOptions.Cookies, ADR 0087): Toda's toda_session and toda_csrf; toda_embedded,
     // set by the phone app's handoff so the shell shows only the page (ADR 0073, 0075); and the web's chosen language,
@@ -269,10 +269,13 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
     public static GuardCookieOptions Names(HttpContext http) =>
         http.RequestServices?.GetService<IOptions<GuardOptions>>()?.Value.Cookies ?? new GuardCookieOptions();
 
+    /// <summary>Guard's names for the anti-forgery header and value, as the host set them (Guard:Names).</summary>
+    public static GuardNames Wire(HttpContext http) => http.RequestServices?.GetService<IOptions<GuardNames>>()?.Value ?? new GuardNames();
+
     /// <summary>The session's id (OpenID Connect's claim), so the person's list can say which session is this one.</summary>
     public const string SessionIdClaim = "sid";
 
-    private const string CsrfFailedItem = "toda.csrf-failed";
+    private const string CsrfFailedItem = "guard.csrf-failed";
 
     /// <summary>Whether a request comes with a session cookie (and so goes to this handler, when it has no bearer token).</summary>
     public static bool Carries(HttpRequest request) => request.Cookies.ContainsKey(Names(request.HttpContext).Session);
@@ -284,7 +287,7 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
             return AuthenticateResult.NoResult();
         }
 
-        if (!IsSafe(Request.Method) && !WebSessions.CsrfMatches(secret, await CsrfValueAsync()))
+        if (!IsSafe(Request.Method) && !WebSessions.CsrfMatches(secret, await CsrfValueAsync(), Wire(Context)))
         {
             Context.Items[CsrfFailedItem] = true;
             return AuthenticateResult.Fail("The request changes something but has no anti-forgery header, or a wrong one.");
@@ -317,7 +320,7 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
     /// </summary>
     private async Task<string?> CsrfValueAsync()
     {
-        if (Request.Headers[CsrfHeader].ToString() is { Length: > 0 } header)
+        if (Request.Headers[Wire(Context).CsrfHeader].ToString() is { Length: > 0 } header)
         {
             return header;
         }
@@ -351,7 +354,7 @@ public sealed class WebSessionHandler(IOptionsMonitor<AuthenticationSchemeOption
             HttpOnly = httpOnly, Secure = secure, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = WebSessions.Lifetime, IsEssential = true,
         };
         http.Response.Cookies.Append(names.Session, secret, Cookie(httpOnly: true));
-        http.Response.Cookies.Append(names.Csrf, WebSessions.CsrfFor(secret), Cookie(httpOnly: false));
+        http.Response.Cookies.Append(names.Csrf, WebSessions.CsrfFor(secret, Wire(http)), Cookie(httpOnly: false));
         if (embedded ?? http.Request.Cookies.ContainsKey(names.Embedded))
         {
             http.Response.Cookies.Append(names.Embedded, "1", Cookie(httpOnly: false));

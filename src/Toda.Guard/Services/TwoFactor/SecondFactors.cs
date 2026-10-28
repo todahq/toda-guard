@@ -72,7 +72,8 @@ public sealed class SecondFactors(
     IConfiguration configuration,
     IOptions<GuardOptions> options,
     IGuardMessenger messenger,
-    ILogger<SecondFactors> logger) : ITransientDependency
+    ILogger<SecondFactors> logger,
+    IOptions<GuardNames> names) : ITransientDependency
 {
     public const int RecoveryCodeCount = 10;
     private const int MaxWrongCodes = 10;
@@ -83,7 +84,7 @@ public sealed class SecondFactors(
     private const int MaxSendsPerTicket = 3;
     private const string RecoveryAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-    private IDataProtector Protector => protection.CreateProtector("Toda.Guard.SecondFactor.v1");
+    private IDataProtector Protector => protection.CreateProtector(names.Value.Purpose("SecondFactor.v1"));
 
     /// <summary>The emergency switch: nobody is asked for a second factor.</summary>
     public bool Disabled => configuration.GetValue("Guard:TwoFactor:Disabled", false) || !options.Value.Features.TwoFactor;

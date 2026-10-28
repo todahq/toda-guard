@@ -10,9 +10,9 @@ namespace Toda.Guard.Services;
 /// Encrypts secret directory settings (bind passwords) at rest. They have to be reversible because the
 /// password is replayed to bind, so they are encrypted rather than hashed, and never returned by the API.
 /// </summary>
-public class DirectorySecrets(IDataProtectionProvider dataProtection) : ISingletonDependency
+public class DirectorySecrets(IDataProtectionProvider dataProtection, Microsoft.Extensions.Options.IOptions<GuardNames> names) : ISingletonDependency
 {
-    private readonly IDataProtector _protector = dataProtection.CreateProtector("Toda.Guard.DirectorySecrets.v1");
+    private readonly IDataProtector _protector = dataProtection.CreateProtector(names.Value.Purpose("DirectorySecrets.v1"));
 
     public const string Mask = "********";
 
