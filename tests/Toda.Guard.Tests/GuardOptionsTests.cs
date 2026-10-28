@@ -16,6 +16,14 @@ public class GuardOptionsTests
     }
 
     [Fact]
+    public void Guard_needs_ABPs_clock_in_UTC_and_says_so_otherwise()
+    {
+        Assert.Null(TodaGuardModule.ClockProblem(new Volo.Abp.Timing.AbpClockOptions { Kind = DateTimeKind.Utc }));
+        Assert.Contains("needs it in UTC", TodaGuardModule.ClockProblem(new Volo.Abp.Timing.AbpClockOptions { Kind = DateTimeKind.Local }));
+        Assert.NotNull(TodaGuardModule.ClockProblem(new Volo.Abp.Timing.AbpClockOptions { Kind = DateTimeKind.Unspecified }));
+    }
+
+    [Fact]
     public void The_Guard_section_binds_and_its_other_keys_are_left_alone()
     {
         GuardOptions options = Bound(("Guard:PublicUrl", "https://toda.example"), ("Guard:Site:TimeZone", "Asia/Riyadh"),

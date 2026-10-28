@@ -17,7 +17,10 @@ public class ServiceAccountMaker(GuardDb guardDb, AccountProjector projector, Se
     public async Task<AccountInfo> CreateAsync(ServiceAccountInput input, CancellationToken cancellationToken = default) =>
         AccountLookup.ToInfo((await MakeAsync(input, cancellationToken)).Account);
 
-    /// <summary>Makes the account and publishes what changed; returns it with its directory's name.</summary>
+    /// <summary>
+    /// Makes the account and publishes what changed, in one unit of work: the account, its audit entry and its events
+    /// commit together or not at all. Returns it with its directory's name.
+    /// </summary>
     internal async Task<(Account Account, string Directory)> MakeAsync(ServiceAccountInput input, CancellationToken cancellationToken)
     {
         string username = (input.Username ?? "").Trim();
@@ -27,7 +30,7 @@ public class ServiceAccountMaker(GuardDb guardDb, AccountProjector projector, Se
         }
 
         string normalized = GuardConstants.Normalize(username);
-        (Account account, string directory, List<object> raised) = await guardDb.RunAsync(async db =>
+        return await guardDb.RunAsync(async db =>
         {
             if (await db.DirectoryUsers.AnyAsync(u => u.DirectoryId == GuardConstants.InternalDirectoryId && u.NormalizedUsername == normalized, cancellationToken)
                 || await db.Accounts.AnyAsync(a => a.NormalizedUsername == normalized, cancellationToken))
@@ -49,14 +52,13 @@ public class ServiceAccountMaker(GuardDb guardDb, AccountProjector projector, Se
             audit.Add(db, SecurityAuditTypes.AccountCreated, new AuditTarget("Account", account.Id, account.Username),
                 input.Agent ? new { directory, service = true, agent = true } : new { directory, service = true });
             await db.SaveChangesAsync(cancellationToken);
-            return (account, directory, raised);
+            // In the account's unit of work: the events commit with it (ADR 0047), so a failure leaves no account behind.
+            foreach (object e in raised)
+            {
+                await GuardEvents.PublishAsync(events, e, cancellationToken);
+            }
+
+            return (account, directory);
         }, requiresNew: true, cancellationToken, isTransactional: true);
-
-        foreach (object e in raised)
-        {
-            await GuardEvents.PublishAsync(events, e, cancellationToken);
-        }
-
-        return (account, directory);
     }
 }

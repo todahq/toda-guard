@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace Toda.Guard.Host.Tests;
@@ -122,6 +123,27 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
         HttpResponseMessage redirected = await Client().SendAsync(handoff);
         Assert.Equal(HttpStatusCode.Redirect, redirected.StatusCode);
         Assert.Equal("/login?next=%2Fprojects", redirected.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
+    public async Task The_host_makes_a_service_account_and_its_events_commit_with_it()
+    {
+        // The host sets nothing about ABP's clock: Guard keeps it in UTC, which its outbox and Postgres need.
+        _ = Client();
+        using (IServiceScope scope = _factory!.Services.CreateScope())
+        {
+            Assert.Equal(DateTimeKind.Utc, scope.ServiceProvider.GetRequiredService<Volo.Abp.Timing.IClock>().Kind);
+            AccountInfo made = await scope.ServiceProvider.GetRequiredService<IServiceAccounts>().CreateAsync(new ServiceAccountInput("robot") { DisplayName = "Robot" });
+            Assert.Equal("robot", made.Username);
+        }
+
+        // The account, its audit entry and its event are one unit of work: all three are there.
+        await using NpgsqlConnection connection = new($"{Server};Database={_database}");
+        await connection.OpenAsync();
+        await using NpgsqlCommand count = new(
+            "SELECT (SELECT count(*) FROM guard.accounts WHERE \"Username\" = 'robot') + (SELECT count(*) FROM guard.security_events WHERE \"Type\" = 'account.created' AND \"TargetName\" = 'robot')"
+            + " + (SELECT count(*) FROM guard.\"AbpEventOutbox\" WHERE \"EventName\" LIKE '%AccountCreated%')", connection);
+        Assert.Equal(3L, (long)(await count.ExecuteScalarAsync())!);
     }
 
     private static async Task AssertErrorAsync(HttpResponseMessage response, HttpStatusCode status, string code)

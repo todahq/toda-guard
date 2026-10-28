@@ -47,6 +47,9 @@ public class TodaGuardModule : AbpModule
         IConfiguration configuration = context.Services.GetConfiguration();
 
         context.Services.AddAbpDbContext<GuardDbContext>();
+        // ABP's clock in UTC (ADR 0087): the outbox stamps its rows with it, and Postgres takes only UTC in timestamptz.
+        // A host that sets another kind is told at start (OnApplicationInitialization).
+        Configure<Volo.Abp.Timing.AbpClockOptions>(options => options.Kind = DateTimeKind.Utc);
         // Where Guard's events go (ADR 0087): ABP's distributed bus and Guard's outbox, unless the host says otherwise.
         context.Services.TryAddTransient<IGuardEventSink, DistributedGuardEventSink>();
         // Locks every server shares (ADR 0087): Postgres advisory locks on Guard's database, unless the host gives its own.
@@ -171,8 +174,18 @@ public class TodaGuardModule : AbpModule
         context.Services.AddHostedService<SecurityAuditRetention>();
     }
 
+    /// <summary>Why Guard can't run with ABP's clock as the host set it, or null: it needs UTC.</summary>
+    public static string? ClockProblem(Volo.Abp.Timing.AbpClockOptions clock) => clock.Kind == DateTimeKind.Utc ? null
+        : $"Guard can't start: ABP's clock is {clock.Kind}, and Guard needs it in UTC (its outbox stamps rows with it, and Postgres "
+          + "keeps only UTC times). Leave AbpClockOptions.Kind as Guard sets it, DateTimeKind.Utc.";
+
     public override void OnApplicationInitialization(Volo.Abp.ApplicationInitializationContext context)
     {
+        if (ClockProblem(context.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Volo.Abp.Timing.AbpClockOptions>>().Value) is { } clock)
+        {
+            throw new InvalidOperationException(clock);
+        }
+
         // What Guard protects lives and dies with the key ring (ADR 0082, 0087): a site that doesn't keep it doesn't start;
         // a developer's machine is told.
         if (GuardKeyRing.Problem(context.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.DataProtection.KeyManagement.KeyManagementOptions>>().Value) is { } keyRing)
