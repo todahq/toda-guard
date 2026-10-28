@@ -129,7 +129,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
                 UserDirectory directory = await db.Directories.FirstOrDefaultAsync(d => d.Id == id, ct) ?? throw new UserFriendlyException("There's no such directory.");
                 if (!directory.IsInternal)
                 {
-                    throw new UserFriendlyException($"{directory.Name} isn't kept by Toda: sign-ups go to an internal directory, such as one called Customers.");
+                    throw new UserFriendlyException($"{directory.Name} isn't kept by {options.Value.Texts.Product()}: sign-ups go to an internal directory, such as one called Customers.");
                 }
             }
             else if (input.Enabled)

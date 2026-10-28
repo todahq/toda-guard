@@ -12,8 +12,11 @@ namespace Toda.Guard.Controllers;
 
 [Route("api/guard/groups")]
 [Authorize(Policy = GuardPolicies.Admin)]
-public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLog audit) : GuardControllerBase
+public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLog audit, Microsoft.Extensions.Options.IOptions<GuardOptions> options) : GuardControllerBase
 {
+    /// <summary>What Guard's messages call the host (Texts.ProductName).</summary>
+    private string Product => options.Value.Texts.Product();
+
     [HttpGet]
     public Task<List<GroupDto>> List([FromQuery] string? search, [FromQuery] Guid? directoryId, [FromQuery] string? kind, CancellationToken cancellationToken) =>
         guardDb.RunAsync(async db =>
@@ -119,7 +122,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
         string kind = input.Kind ?? GroupKinds.Standard;
         if (kind is not (GroupKinds.Standard or GroupKinds.Organization))
         {
-            throw new UserFriendlyException("Groups made here are standard groups or organizations; Toda keeps directory and OU groups itself.");
+            throw new UserFriendlyException($"Groups made here are standard groups or organizations; {Product} keeps directory and OU groups itself.");
         }
 
         if (string.IsNullOrWhiteSpace(input.Name) || input.Name.Trim().Length > 128)
@@ -177,7 +180,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
             if (!IsWritable(group))
             {
                 throw new UserFriendlyException(group.Computed
-                    ? $"Toda keeps '{group.Name}' in step with its directory; change the directory instead."
+                    ? $"{Product} keeps '{group.Name}' in step with its directory; change the directory instead."
                     : $"'{group.Name}' is synced from a directory. Change it there.");
             }
 
@@ -250,7 +253,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
     {
         if (id == GuardConstants.AdminsGroupId || id == GuardConstants.UsersGroupId)
         {
-            throw new UserFriendlyException("toda-admins and toda-users are system groups and can't be deleted.");
+            throw new UserFriendlyException($"{options.Value.AdminsGroupName} and {options.Value.Seed.UsersGroupName} are system groups and can't be deleted.");
         }
 
         await guardDb.RunAsync(async db =>
@@ -260,7 +263,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
             if (!IsWritable(group))
             {
                 throw new UserFriendlyException(group.Computed
-                    ? $"Toda keeps '{group.Name}' in step with its directory: it goes when the directory (or the OU in its settings) does."
+                    ? $"{Product} keeps '{group.Name}' in step with its directory: it goes when the directory (or the OU in its settings) does."
                     : $"'{group.Name}' is synced from a directory. Delete it there.");
             }
 
@@ -291,7 +294,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
             if (!IsWritable(group))
             {
                 throw new UserFriendlyException(group.Computed
-                    ? $"Toda works out who is in '{group.Name}' from its directory. Nest it inside another group instead."
+                    ? $"{Product} works out who is in '{group.Name}' from its directory. Nest it inside another group instead."
                     : $"'{group.Name}' is synced from a directory, so its members are managed there. Nest it inside an internal group instead.");
             }
 
@@ -363,7 +366,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
                 if (rows.Count > 0)
                 {
                     string directory = await db.Directories.Where(d => d.Id == group.DirectoryId).Select(d => d.Name).FirstAsync(cancellationToken);
-                    throw new UserFriendlyException($"This membership comes from {directory}. Change it there; the next sync will update Toda.");
+                    throw new UserFriendlyException($"This membership comes from {directory}. Change it there; the next sync will update {Product}.");
                 }
 
                 throw new EntityNotFoundException(typeof(GroupMembership), memberId);

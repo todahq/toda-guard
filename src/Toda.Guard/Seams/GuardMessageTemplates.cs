@@ -83,6 +83,9 @@ public sealed class GuardTextOptions
         ["ar"] = PersonalDataExportTexts.Arabic,
     };
 
+    /// <summary>The product's name in a language ("ar" for "ar-SA"), else its English name: what Guard's texts call the host.</summary>
+    public string Product(string language = "en") => GuardMessageTemplates.ProductIn(ProductName, Base(language));
+
     /// <summary>The record's words in a language ("ar" for "ar-SA"), English's when it has none, naming the host's product.</summary>
     public ProcessingRecordTexts RecordIn(string language)
     {
@@ -127,13 +130,14 @@ public static class GuardMessageTemplates
     public static GuardMessageTemplate? Find(GuardTextOptions texts, string key) => For(texts).FirstOrDefault(t => t.Key == key);
 
     /// <summary>A text of Guard's in a language with the host's product named in place of Toda's; unchanged for Toda's.</summary>
-    internal static string Naming(string text, string language, IReadOnlyDictionary<string, string> product)
-    {
-        string name = product.TryGetValue(language, out string? own) && own is { Length: > 0 } ? own
-            : product.TryGetValue("en", out string? english) && english is { Length: > 0 } ? english
-            : DefaultProductName;
-        return text.Replace(language == "ar" ? DefaultProductNameArabic : DefaultProductName, name, StringComparison.Ordinal);
-    }
+    internal static string Naming(string text, string language, IReadOnlyDictionary<string, string> product) =>
+        text.Replace(language == "ar" ? DefaultProductNameArabic : DefaultProductName, ProductIn(product, language), StringComparison.Ordinal);
+
+    /// <summary>The product's name in a language, else its English name, else Guard's own.</summary>
+    internal static string ProductIn(IReadOnlyDictionary<string, string> product, string language) =>
+        product.TryGetValue(language, out string? own) && own is { Length: > 0 } ? own
+        : product.TryGetValue("en", out string? english) && english is { Length: > 0 } ? english
+        : DefaultProductName;
 
     /// <summary>The template with the host's product named in place of Toda's, language by language; unchanged for Toda's.</summary>
     private static GuardMessageTemplate Named(GuardMessageTemplate template, IReadOnlyDictionary<string, string> product)

@@ -10,8 +10,11 @@ namespace Toda.Guard.Services;
 /// knows it owns the account. The account keeps its Id when the owning directory changes.
 /// Returns the events to publish once the changes are saved.
 /// </summary>
-public class AccountProjector : ITransientDependency
+public class AccountProjector(Microsoft.Extensions.Options.IOptions<GuardOptions>? options = null) : ITransientDependency
 {
+    /// <summary>What a status reason calls the host (Texts.ProductName).</summary>
+    private string Product => options?.Value.Texts.Product() ?? GuardMessageTemplates.DefaultProductName;
+
     public async Task<List<object>> RebuildAsync(GuardDbContext db, IReadOnlyCollection<string>? normalizedUsernames = null, CancellationToken cancellationToken = default)
     {
         List<UserDirectory> directories = await db.Directories.OrderBy(d => d.Order).ToListAsync(cancellationToken);
@@ -40,14 +43,14 @@ public class AccountProjector : ITransientDependency
                 account = new Account(Guid.NewGuid(), winner.Username);
                 db.Accounts.Add(account);
                 accounts[username] = account;
-                Apply(account, winner, directory);
+                Apply(account, winner, directory, Product);
                 events.Add(new AccountCreatedEto(account.Id, account.Username, directory.Id));
                 continue;
             }
 
             AccountStatus before = account.Status;
             Guid directoryBefore = account.DirectoryId;
-            Apply(account, winner, directory);
+            Apply(account, winner, directory, Product);
             AddStatusEvents(events, account, before);
             if (directoryBefore != account.DirectoryId)
             {
@@ -66,7 +69,7 @@ public class AccountProjector : ITransientDependency
             }
 
             orphan.Status = orphan.LockedLocally ? AccountStatus.Locked : AccountStatus.Inactive;
-            orphan.StatusReason = orphan.LockedLocally ? "Locked in Toda" : "Not found in any active directory";
+            orphan.StatusReason = orphan.LockedLocally ? $"Locked in {Product}" : "Not found in any active directory";
             AddStatusEvents(events, orphan, before);
         }
 
@@ -86,7 +89,7 @@ public class AccountProjector : ITransientDependency
             .ToDictionary(g => g.Key, g => g.OrderBy(u => active[u.DirectoryId].Order).ThenBy(u => u.DirectoryId).First());
     }
 
-    internal static void Apply(Account account, DirectoryUser winner, UserDirectory directory)
+    internal static void Apply(Account account, DirectoryUser winner, UserDirectory directory, string product = GuardMessageTemplates.DefaultProductName)
     {
         account.Username = winner.Username;
         account.DisplayName = string.IsNullOrWhiteSpace(winner.DisplayName) ? winner.Username : winner.DisplayName!;
@@ -101,7 +104,7 @@ public class AccountProjector : ITransientDependency
         }
 
         (account.Status, account.StatusReason) = account.LockedLocally
-            ? (AccountStatus.Locked, "Locked in Toda")
+            ? (AccountStatus.Locked, $"Locked in {product}")
             : winner.IsActive
                 ? (AccountStatus.Active, null)
                 : (AccountStatus.Inactive, $"Disabled in {directory.Name}");

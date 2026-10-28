@@ -52,7 +52,7 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
         await EnsureGroupAsync(db, GuardConstants.AdminsGroupId, options.Value.AdminsGroupName, seed.AdminsGroupDescription, cancellationToken);
         await EnsureGroupAsync(db, GuardConstants.UsersGroupId, seed.UsersGroupName, seed.UsersGroupDescription, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-        await DirectoryGroups.EnsureAsync(db, cancellationToken);
+        await DirectoryGroups.EnsureAsync(db, cancellationToken, options.Value.Texts.Product());
         if (!await db.SignUpSettings.AnyAsync(s => s.Id == SignUpSettings.SiteId, cancellationToken))
         {
             // Closed, or open into the internal directory when the host says so (Guard:SignUp:Open). Once: an admin's

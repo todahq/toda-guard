@@ -23,7 +23,8 @@ public class DirectoriesController(
     DirectorySyncService sync,
     AccountProjector projector,
     AuthService auth,
-    SecurityLog audit) : GuardControllerBase
+    SecurityLog audit,
+    Microsoft.Extensions.Options.IOptions<GuardOptions> options) : GuardControllerBase
 {
     public sealed record DirectoryTypeDto(string Type, string DisplayName, List<string> Capabilities, List<DirectorySettingDefinition> Settings, string? PluginKey);
 
@@ -77,7 +78,7 @@ public class DirectoriesController(
                 secrets = secretsSet,
             });
             await db.SaveChangesAsync(cancellationToken);
-            await DirectoryGroups.EnsureAsync(db, cancellationToken);
+            await DirectoryGroups.EnsureAsync(db, cancellationToken, options.Value.Texts.Product());
             await db.SaveChangesAsync(cancellationToken);
             List<object> events = await projector.RebuildAsync(db, cancellationToken: cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -125,7 +126,7 @@ public class DirectoriesController(
                 secrets = secretsReplaced,
             });
             await db.SaveChangesAsync(cancellationToken);
-            await DirectoryGroups.EnsureAsync(db, cancellationToken);
+            await DirectoryGroups.EnsureAsync(db, cancellationToken, options.Value.Texts.Product());
             await db.SaveChangesAsync(cancellationToken);
             List<object> events = await projector.RebuildAsync(db, cancellationToken: cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -232,7 +233,7 @@ public class DirectoriesController(
         UserDirectory directory = await LoadAsync(id, cancellationToken);
         if (directory.IsInternal)
         {
-            return new ConnectionTestResult(true, "The internal directory is stored in Toda's database and is always available.");
+            return new ConnectionTestResult(true, $"The internal directory is stored in {options.Value.Texts.Product()}'s database and is always available.");
         }
 
         return await connectors.WithConnectorAsync(directory.Type, async (connector, _) => connector is null

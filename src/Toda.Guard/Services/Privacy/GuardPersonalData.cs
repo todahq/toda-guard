@@ -11,8 +11,15 @@ namespace Toda.Guard.Services.Privacy;
 /// holding nothing about people; tests/Toda.Projects.Tests/DataMapTests.cs holds that.
 /// </summary>
 [ExposeServices(typeof(IPersonalDataDeclarations))]
-public sealed class GuardPersonalData : IPersonalDataDeclarations, ITransientDependency
+public sealed class GuardPersonalData(Microsoft.Extensions.Options.IOptions<GuardOptions>? options = null) : IPersonalDataDeclarations, ITransientDependency
 {
+    /// <summary>A text in English and Arabic with the host's product named in each.</summary>
+    private static LocalizedText Named(Microsoft.Extensions.Options.IOptions<GuardOptions>? options, string en, string ar) =>
+        new(NamedIn(options, en, "en"), NamedIn(options, ar, "ar"));
+
+    private static string NamedIn(Microsoft.Extensions.Options.IOptions<GuardOptions>? options, string text, string language) =>
+        GuardMessageTemplates.Naming(text, language, (options?.Value.Texts ?? new GuardTextOptions()).ProductName);
+
     private const string Owner = "guard";
 
     public IReadOnlyList<PersonalDataStore> Stores { get; } =
@@ -27,7 +34,7 @@ public sealed class GuardPersonalData : IPersonalDataDeclarations, ITransientDep
             PersonalDataSubjects.Accounts, [Identity, Contact, Credentials, Activity], PersonalDataKept.Forever, [To.Directory, To.Mail], []),
         new("guard.access", Owner,
             new("Groups and roles", "المجموعات والأدوار"),
-            new("Which groups people are in, from a directory or set in Toda, and the roles granted to them.",
+            Named(options, "Which groups people are in, from a directory or set in Toda, and the roles granted to them.",
                 "المجموعات التي ينتمي إليها الأشخاص، من دليل أو في تودا، والأدوار الممنوحة لهم."),
             ["guard.memberships", "guard.role_grants"], [],
             PersonalDataSubjects.Accounts, [Identity], PersonalDataKept.WithAccount, [], []),
@@ -73,7 +80,7 @@ public sealed class GuardPersonalData : IPersonalDataDeclarations, ITransientDep
 
     public IReadOnlyList<NonPersonalTable> NotPersonal { get; } =
     [
-        new("guard.directories", "the directories Toda reads people from, and their settings"),
+        new("guard.directories", NamedIn(options, "the directories Toda reads people from, and their settings", "en")),
         new("guard.sync_runs", "when each directory sync ran and what it counted"),
         new("guard.groups", "groups and how they're kept"),
         new("guard.roles", "roles"),

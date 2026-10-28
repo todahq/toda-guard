@@ -10,12 +10,13 @@ namespace Toda.Guard.Services;
 /// </summary>
 public static class DirectoryGroups
 {
-    public const string Description = "Everyone whose account comes from this directory. Toda keeps it in step.";
+    /// <summary>A directory group's description, naming the host's product.</summary>
+    public static string DescriptionFor(string product) => $"Everyone whose account comes from this directory. {product} keeps it in step.";
 
     public static string NameFor(string directoryName) => $"{directoryName} (everyone)";
 
     /// <summary>Gives every directory its group, named after it; renames it when the directory is renamed. Doesn't save.</summary>
-    public static async Task EnsureAsync(GuardDbContext db, CancellationToken ct)
+    public static async Task EnsureAsync(GuardDbContext db, CancellationToken ct, string product = GuardMessageTemplates.DefaultProductName)
     {
         List<UserDirectory> directories = await db.Directories.ToListAsync(ct);
         List<Group> groups = await db.Groups.Where(g => directories.Select(d => d.Id).Contains(g.DirectoryId)).ToListAsync(ct);
@@ -25,7 +26,7 @@ public static class DirectoryGroups
             string name = Free(groups, directory.Id, NameFor(directory.Name), mine);
             if (mine is null)
             {
-                mine = new Group(Guid.NewGuid(), directory.Id, name, isLocal: true) { Kind = GroupKinds.Directory, Description = Description };
+                mine = new Group(Guid.NewGuid(), directory.Id, name, isLocal: true) { Kind = GroupKinds.Directory, Description = DescriptionFor(product) };
                 db.Groups.Add(mine);
                 groups.Add(mine);
             }

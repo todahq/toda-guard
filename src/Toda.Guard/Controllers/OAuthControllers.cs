@@ -54,7 +54,7 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb, IOptions<G
         if (Acting.SubjectId is not { } accountId)
         {
             return request.HasPromptValue(PromptValues.None)
-                ? Refuse(Errors.LoginRequired, "Sign in to Toda first.")
+                ? Refuse(Errors.LoginRequired, $"Sign in to {options.Value.Texts.Product()} first.")
                 : Redirect("/login?next=" + Uri.EscapeDataString("/connect/authorize" + query));
         }
 

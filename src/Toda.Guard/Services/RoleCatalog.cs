@@ -17,7 +17,8 @@ namespace Toda.Guard.Services;
 /// ${grant.projectId}, and a member is a grant with scope {"projectId": …} and scope key "project:{id}".
 /// </summary>
 [ExposeServices(typeof(RoleCatalog), typeof(IRoleCatalog))]
-public class RoleCatalog(GuardDb guardDb, MembershipGraph graph, SecurityLog audit) : ITransientDependency, IRoleCatalog
+public class RoleCatalog(GuardDb guardDb, MembershipGraph graph, SecurityLog audit, Microsoft.Extensions.Options.IOptions<GuardOptions> options)
+    : ITransientDependency, IRoleCatalog
 {
     public static readonly System.Text.RegularExpressions.Regex KeyPattern = RoleKeys.Pattern;
 
@@ -165,7 +166,7 @@ public class RoleCatalog(GuardDb guardDb, MembershipGraph graph, SecurityLog aud
                 ?? throw new EntityNotFoundException(typeof(RoleGrant), grantId);
             if (grant.RoleId == GuardRoles.AdministratorId && grant.PrincipalId == GuardConstants.AdminsGroupId)
             {
-                throw new UserFriendlyException("The Administrator grant to toda-admins can't be revoked; manage admins through that group.");
+                throw new UserFriendlyException($"The Administrator grant to {options.Value.AdminsGroupName} can't be revoked; manage admins through that group.");
             }
 
             db.RoleGrants.Remove(grant);

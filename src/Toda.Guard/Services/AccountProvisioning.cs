@@ -14,7 +14,8 @@ namespace Toda.Guard.Services;
 /// </summary>
 [ExposeServices(typeof(IAccountProvisioning))]
 public class AccountProvisioning(GuardDb guardDb, AccountProjector projector, IMembershipResolver membership, IGuardEventSink events,
-    AccountMergeService merges, SecurityLog audit, Microsoft.Extensions.Options.IOptions<GuardNames> names) : IAccountProvisioning, ITransientDependency
+    AccountMergeService merges, SecurityLog audit, Microsoft.Extensions.Options.IOptions<GuardNames> names, Microsoft.Extensions.Options.IOptions<GuardOptions> options)
+    : IAccountProvisioning, ITransientDependency
 {
     public async Task<ProvisionedAccount> EnsureInternalAccountAsync(Guid callerId, string username, string displayName, string? email, string? password,
         CancellationToken cancellationToken = default)
@@ -59,7 +60,7 @@ public class AccountProvisioning(GuardDb guardDb, AccountProjector projector, IM
             await db.SaveChangesAsync(cancellationToken);
             await Organizations.ApplyDomainsAsync(db, cancellationToken);
             Account created = await db.Accounts.FirstAsync(a => a.NormalizedUsername == normalized, cancellationToken);
-            audit.Add(db, SecurityAuditTypes.AccountCreated, new AuditTarget("Account", created.Id, created.Username), new { directory = "Toda", seeded = true });
+            audit.Add(db, SecurityAuditTypes.AccountCreated, new AuditTarget("Account", created.Id, created.Username), new { directory = options.Value.Texts.Product(), seeded = true });
             await db.SaveChangesAsync(cancellationToken);
             return (new ProvisionedAccount(created.Id, "created"), events);
         }, requiresNew: true, cancellationToken, isTransactional: true);

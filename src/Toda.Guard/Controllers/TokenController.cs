@@ -122,7 +122,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
             {
                 if (request.GetParameter(StepUpParameter) is not null)
                 {
-                    return Refuse("Only Toda's own web app can ask for a step-up.", Errors.UnauthorizedClient);
+                    return Refuse($"Only {options.Value.Texts.Product()}'s own web app can ask for a step-up.", Errors.UnauthorizedClient);
                 }
 
                 return await AppTokensAsync(refreshed.Principal, cancellationToken);
@@ -149,7 +149,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
             {
                 if (request.ClientId != options.Value.Clients.Web)
                 {
-                    return Refuse("Only Toda's own web app can ask for a step-up.", Errors.UnauthorizedClient);
+                    return Refuse($"Only {options.Value.Texts.Product()}'s own web app can ask for a step-up.", Errors.UnauthorizedClient);
                 }
 
                 StepUpResult stepUp = await auth.StepUpAsync(account.Id, password, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);

@@ -202,7 +202,7 @@ public class TodaGuardModule : AbpModule
         {
             if (!context.ServiceProvider.GetRequiredService<IHostEnvironment>().IsDevelopment())
             {
-                throw new InvalidOperationException($"Guard can't start: {keyRing}. Keep the key ring where every server and restart reads it (Toda keeps it in Postgres).");
+                throw new InvalidOperationException($"Guard can't start: {keyRing}. Keep the key ring where every server and restart reads it, such as Postgres (AddGuardKeyRing).");
             }
 
             context.ServiceProvider.GetRequiredService<ILogger<TodaGuardModule>>().LogWarning(
