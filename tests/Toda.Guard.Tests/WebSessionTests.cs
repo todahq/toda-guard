@@ -15,7 +15,7 @@ public class WebSessionTests
     [Fact]
     public void A_bearer_token_wins_over_the_cookie()
     {
-        Assert.Equal("TodaToken", TodaGuardModule.SchemeFor(Request(authorization: "Bearer toda_pat_abc", cookie: Secret)));
+        Assert.Equal(PersonalTokenHandler.SchemeName, TodaGuardModule.SchemeFor(Request(authorization: "Bearer " + Names.PersonalTokenPrefix + "abc", cookie: Secret)));
         Assert.Equal("OpenIddict.Validation.AspNetCore", TodaGuardModule.SchemeFor(Request(authorization: "Bearer eyJhbGciOi", cookie: Secret)));
     }
 

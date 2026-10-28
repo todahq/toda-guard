@@ -146,9 +146,9 @@ public sealed class GuardPageOptions
 /// </summary>
 public sealed class GuardClientOptions
 {
-    public string Web { get; set; } = "toda-web";
+    public string Web { get; set; } = Controllers.GuardOidc.WebClientId;
 
-    public string Mobile { get; set; } = "toda-mobile";
+    public string Mobile { get; set; } = Controllers.GuardOidc.MobileClientId;
 }
 
 /// <summary>A site's time zone (an IANA name), the day its weeks start on, and the languages people may choose.</summary>

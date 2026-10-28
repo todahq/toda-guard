@@ -23,6 +23,7 @@ public class GuardOptionsTests
         Assert.Equal(("Toda Administrator", "admin@toda.local", "Toda internal", "toda-users", "Everyone who may sign in to Toda."),
             (toda.Seed.AdminDisplayName, toda.Seed.AdminEmail, toda.Seed.InternalDirectoryName, toda.Seed.UsersGroupName, toda.Seed.UsersGroupDescription));
         Assert.Equal("Toda administrators. Members, direct or nested, can administer Toda.", toda.Seed.AdminsGroupDescription);
+        Assert.Equal("toda-admins", toda.AdminsGroupName);
         Assert.False(Services.SelfService.Initial(toda.SignUp).Enabled);
 
         GuardOptions host = Bound(("Guard:SignUp:Open", "true"), ("Guard:Seed:UsersGroupName", "market-users"), ("Guard:Seed:AdminPassword", "x"));
@@ -35,7 +36,7 @@ public class GuardOptionsTests
     }
 
     [Fact]
-    public void The_authenticators_issuer_is_Todas_as_before_unless_the_host_names_it()
+    public void The_authenticators_issuer_is_the_products_unless_the_host_names_it()
     {
         Assert.Equal("Toda (toda.example)", Services.TwoFactor.SecondFactors.IssuerFor(new GuardOptions { PublicUrl = "https://toda.example" }));
         Assert.Equal("Toda", Services.TwoFactor.SecondFactors.IssuerFor(new GuardOptions()));

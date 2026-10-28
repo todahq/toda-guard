@@ -1,6 +1,6 @@
 namespace Toda.Guard;
 
-/// <summary>Guard's authorization policies (ADR 0087), by the names Toda has always used.</summary>
+/// <summary>Guard's authorization policies (ADR 0087); the host's own admin endpoints use the same names.</summary>
 public static class GuardPolicies
 {
     /// <summary>

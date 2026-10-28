@@ -15,10 +15,11 @@ public sealed class OidcKeysTests : IDisposable
         new ConfigurationBuilder().AddInMemoryCollection(settings.Select(s => KeyValuePair.Create(s.Key, (string?)s.Value))).Build();
 
     [Fact]
-    public void Guards_data_folder_is_Guard_DataRoot_else_Todas_as_before()
+    public void Guards_data_folder_is_Guard_DataRoot_else_the_hosts()
     {
         Assert.Equal("/guard", TodaGuardModule.DataRoot(Config(("Guard:DataRoot", "/guard"), ("Toda:DataRoot", "/data"))));
-        Assert.Equal("/data", TodaGuardModule.DataRoot(Config(("Toda:DataRoot", "/data"))));
+        // Another setting of the host's is the host's to give (GuardStartupOptions); Toda gives its Toda:DataRoot.
+        Assert.Null(TodaGuardModule.DataRoot(Config(("Toda:DataRoot", "/data"))));
         Assert.Null(TodaGuardModule.DataRoot(Config()));
     }
 

@@ -82,7 +82,8 @@ public class TodaGuardModule : AbpModule
         // first-party Next.js server; APIs validate them locally (ADR 0007).
         // Their keys (ADR 0050): certificates, a folder mounted from a secret store, or Postgres (made once, shared by every node).
         // Where the key files of before are looked for (ADR 0050): Guard:DataRoot, else Toda's Toda:DataRoot as before.
-        string dataRoot = Path.GetFullPath(DataRoot(configuration) ?? Path.Combine(context.Services.GetHostingEnvironment().ContentRootPath, "App_Data"));
+        string dataRoot = Path.GetFullPath(DataRoot(configuration) ?? context.Services.ExecutePreConfiguredActions<GuardStartupOptions>().DataRoot
+            ?? Path.Combine(context.Services.GetHostingEnvironment().ContentRootPath, "App_Data"));
         (SecurityKey signingKey, SecurityKey encryptionKey) = OidcKeys.Resolve(configuration, dataRoot);
 
         context.Services.AddDbContext<OidcDbContext>(options =>
@@ -180,9 +181,8 @@ public class TodaGuardModule : AbpModule
         context.Services.AddHostedService<SecurityAuditRetention>();
     }
 
-    /// <summary>Guard's data folder: Guard:DataRoot, else Toda:DataRoot (what Toda's deployments set), else none.</summary>
-    public static string? DataRoot(IConfiguration configuration) =>
-        configuration["Guard:DataRoot"] is { Length: > 0 } guard ? guard : configuration["Toda:DataRoot"] is { Length: > 0 } toda ? toda : null;
+    /// <summary>Guard's data folder from its settings, Guard:DataRoot, or null (then the host's, <see cref="GuardStartupOptions"/>).</summary>
+    public static string? DataRoot(IConfiguration configuration) => configuration["Guard:DataRoot"] is { Length: > 0 } root ? root : null;
 
     /// <summary>Why Guard can't run with ABP's clock as the host set it, or null: it needs UTC.</summary>
     public static string? ClockProblem(Volo.Abp.Timing.AbpClockOptions clock) => clock.Kind == DateTimeKind.Utc ? null
@@ -219,6 +219,15 @@ public class TodaGuardModule : AbpModule
 }
 
 public sealed class TodaAdminRequirement : IAuthorizationRequirement;
+
+/// <summary>
+/// What a host gives Guard before it starts (ABP's PreConfigure): the data folder when Guard:DataRoot isn't set, such as
+/// a setting of the host's own that its deployments already have.
+/// </summary>
+public sealed class GuardStartupOptions
+{
+    public string? DataRoot { get; set; }
+}
 
 /// <summary>
 /// Admin = may "manage" "all". Out of the box that comes from the Administrator role, granted to the

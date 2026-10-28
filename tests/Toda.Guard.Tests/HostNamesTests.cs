@@ -18,8 +18,12 @@ public class HostNamesTests
         Assert.Equal(("/signup/verify", "/reset-password", "/emails/verify", "/oauth/consent"),
             (options.Pages.SignUpVerify, options.Pages.PasswordReset, options.Pages.AddressVerify, options.Pages.Consent));
         Assert.Equal((GuardOidc.WebClientId, GuardOidc.MobileClientId), (options.Clients.Web, options.Clients.Mobile));
+        Assert.Equal(("toda-web", "toda-mobile"), (options.Clients.Web, options.Clients.Mobile));
         Assert.Equal("toda.api", options.ApiScope);
         Assert.Equal(["toda.api", "offline_access"], Services.OAuthAgents.GrantedScopes(options.ApiScope).ToArray());
+        GuardNames names = new();
+        Assert.Equal(("X-Toda-Csrf", "toda_pat_", "urn:toda:grant-type:second-factor", "Toda.Guard.SecondFactor.v1"),
+            (names.CsrfHeader, names.PersonalTokenPrefix, names.SecondFactorGrantType, names.Purpose("SecondFactor.v1")));
     }
 
     [Fact]

@@ -31,7 +31,7 @@ public class GuardMessengerTests
     [Fact]
     public void A_host_names_its_product_or_gives_its_own_template_and_Toda_keeps_its_texts()
     {
-        // Toda keeps the defaults: its texts are Guard's own, word for word.
+        // Guard's defaults: its texts are its own, word for word.
         GuardTextOptions toda = new();
         Assert.All(GuardMessageTemplates.For(toda).Zip(GuardMessageTemplates.All), pair =>
         {

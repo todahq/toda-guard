@@ -264,8 +264,7 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
 
 public static class GuardOidc
 {
-    /// <summary>The scope every Toda API call needs.</summary>
-    /// <summary>Toda's API scope: <see cref="GuardOptions.ApiScope"/>'s default.</summary>
+    /// <summary>The scope every call to the host's API needs: <see cref="GuardOptions.ApiScope"/>'s default.</summary>
     public const string ApiScope = "toda.api";
 
     /// <summary>The first-party Next.js server (a confidential client).</summary>

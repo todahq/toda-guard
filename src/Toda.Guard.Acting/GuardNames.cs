@@ -22,7 +22,7 @@ public sealed class GuardNames
     /// <summary>A personal access token's (or an app's) access: <c>read</c> or <c>write</c>.</summary>
     public string TokenAccessClaim { get; set; } = "toda_token_access";
 
-    /// <summary>A resource (Toda's project) a personal access token is limited to; one claim each, none for all.</summary>
+    /// <summary>A resource (a project, in Toda) a personal access token is limited to; one claim each, none for all.</summary>
     public string TokenProjectClaim { get; set; } = "toda_token_project";
 
     /// <summary>A tool a personal access token is limited to; one claim each, none for every tool.</summary>
