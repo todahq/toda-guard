@@ -6,6 +6,12 @@ change the API.
 
 ## [Unreleased]
 
+### Security
+
+- Setting up an authenticator app with a sign-in ticket is refused when the ticket's second step is a code the site
+  sends (email or a channel). Before, a password alone could put in an app of one's own there and pass the step without
+  the code.
+
 ## [0.1.0-preview.1] - 2026-10-29
 
 Extracted from Toda at 19563f7d, with its history for these paths. The first version as packages on nuget.org:
