@@ -98,7 +98,7 @@ Some host pieces are folded in rather than given a seam:
   - `Toda.Guard`: the ABP module, domain, services, controllers, and both DbContexts with their migrations
 
   The names keep `Toda.` because plugins bind to the host's contract assemblies by name (ADR 0078). There is also an
-  npm package, `@toda/guard-client`, a small framework-free client from the same repository and tag. It covers
+  npm package, `@todahq/guard-client`, a small framework-free client from the same repository and tag. It covers
   sign-in with its second step, sending a code, setting up the app with a ticket, and recovery codes.
 - **The module depends on ABP's MVC and Postgres modules, not on Toda's platform.** It registers its own controllers.
   A switched-off feature's controllers are removed.
@@ -116,13 +116,13 @@ Some host pieces are folded in rather than given a seam:
 
 ### Repository, history and publishing
 
-- **One repository:** `tekthar/toda/packages/guard` on GitLab. It keeps Toda's paths and the house style of
-  `toda-packages` (ui, tokens): a Keep a Changelog CHANGELOG, a release check, Apache-2.0 with NOTICE, CONTRIBUTING and
-  SECURITY.
-- **CI:** builds, then runs the unit tests and Postgres integration tests against a sample host that uses only the
-  defaults. On a `v*` tag it pushes to the project's package registry with the job token and makes a release.
+- **One repository:** `todahq/toda-guard` on GitHub (its first release was on GitLab). It keeps the
+  app's paths and the house style of the app's packages: a Keep a Changelog CHANGELOG, a release check, Apache-2.0 with
+  NOTICE, CONTRIBUTING and SECURITY.
+- **CI:** GitHub Actions builds, then runs the unit tests and Postgres integration tests against a sample host that
+  uses only the defaults. On a `v*` tag it pushes to nuget.org and makes a GitHub release.
 - **Versions:** SemVer, starting at 0.1.0-preview.1. A pre-1.0 minor may break.
-- **Restoring in Toda:** package source mapping (`Toda.Guard*` from GitLab, everything else from nuget.org), with no
+- **Restoring in Toda:** package source mapping (`Toda.Guard*` and everything else from nuget.org), with no
   credentials in the repository.
 - **History:** Guard's history since its first commit is copied with `git filter-repo` from a fresh clone, never from
   the shared checkout. It is audited for secrets, private hosts and names before anything is pushed.

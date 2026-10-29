@@ -19,7 +19,7 @@ namespace Toda.Guard.Services;
 /// </summary>
 public static class OidcKeys
 {
-    // One node makes the keys: "TODA" and a 2.
+    // One node makes the keys: an id of Guard's own (2).
     private const long KeysLock = 0x4D534152_00000002;
 
     public static (SecurityKey Signing, SecurityKey Encryption) Resolve(IConfiguration configuration, string dataRoot)

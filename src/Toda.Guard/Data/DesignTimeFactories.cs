@@ -14,5 +14,5 @@ public class GuardDbContextFactory : IDesignTimeDbContextFactory<GuardDbContext>
 
 internal static class DesignTime
 {
-    public const string ConnectionString = "Host=localhost;Port=55432;Database=toda;Username=toda;Password=toda";
+    public const string ConnectionString = "Host=localhost;Port=5432;Database=guard;Username=postgres;Password=postgres";
 }
