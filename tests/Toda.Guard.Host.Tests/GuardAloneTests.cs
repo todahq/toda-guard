@@ -356,6 +356,67 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
         Assert.Equal("token.created,token.revoked", await audit.ExecuteScalarAsync());
     }
 
+    [Fact]
+    public async Task A_ticket_whose_step_is_a_sent_code_cant_set_up_an_app_in_its_place()
+    {
+        // Erin's group requires a second factor and the site may mail codes; she has no app.
+        HttpClient admin = Client();
+        string csrf = await SignInAsync(admin, "admin", AdminPassword);
+        Guid erin = await IdAsync(await SendAsync(admin, csrf, HttpMethod.Post, "/api/guard/accounts",
+            new { username = "erin", displayName = "Erin", email = "erin@example.test", password = "Erin-Pass-12345" }));
+        Guid group = await IdAsync(await SendAsync(admin, csrf, HttpMethod.Post, "/api/guard/groups", new { name = "needs-two-factor", description = (string?)null, directoryId = (Guid?)null }));
+        Assert.True((await SendAsync(admin, csrf, HttpMethod.Post, $"/api/guard/groups/{group}/members", new { accountId = erin, groupId = (Guid?)null })).IsSuccessStatusCode);
+        Assert.True((await SendAsync(admin, csrf, HttpMethod.Put, $"/api/guard/groups/{group}/two-factor", new { mode = "required" })).IsSuccessStatusCode);
+        Assert.True((await SendAsync(admin, csrf, HttpMethod.Put, "/api/guard/security/second-factor", new { methods = new[] { "email" } })).IsSuccessStatusCode);
+
+        // Her step is the mailed code: the password's ticket can't put an app of its own there, nor pass without a code.
+        (string ticket, bool enrol, string[] methods) = await ChallengeAsync("erin", "Erin-Pass-12345");
+        Assert.False(enrol);
+        Assert.Equal(["email"], methods);
+        HttpClient visitor = Client();
+        await AssertErrorAsync(await visitor.PostAsJsonAsync("/api/guard/second-factor/enrol/app", new { ticket }), HttpStatusCode.Unauthorized, "ticket_expired");
+        await AssertErrorAsync(await visitor.PostAsJsonAsync("/api/guard/second-factor/enrol/app/confirm", new { ticket, code = "000000" }), HttpStatusCode.Unauthorized, "ticket_expired");
+        Assert.False((await visitor.PostAsJsonAsync("/api/guard/session/second-factor", new { ticket, method = (string?)null, code = (string?)null })).IsSuccessStatusCode);
+
+        // With no code the site can send, the step is to set one up: the same ticket route sets the app up and passes.
+        Assert.True((await SendAsync(admin, csrf, HttpMethod.Put, "/api/guard/security/second-factor", new { methods = Array.Empty<string>() })).IsSuccessStatusCode);
+        (ticket, enrol, methods) = await ChallengeAsync("erin", "Erin-Pass-12345");
+        Assert.True(enrol);
+        Assert.Empty(methods);
+        HttpResponseMessage started = await visitor.PostAsJsonAsync("/api/guard/second-factor/enrol/app", new { ticket });
+        Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+        using JsonDocument app = JsonDocument.Parse(await started.Content.ReadAsStringAsync());
+        string code = Services.TwoFactor.Totp.Code(Services.TwoFactor.Totp.FromBase32(app.RootElement.GetProperty("secret").GetString()!),
+            Services.TwoFactor.Totp.StepAt(DateTimeOffset.UtcNow));
+        Assert.Equal(HttpStatusCode.OK, (await visitor.PostAsJsonAsync("/api/guard/second-factor/enrol/app/confirm", new { ticket, code })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await visitor.PostAsJsonAsync("/api/guard/session/second-factor", new { ticket, method = (string?)null, code = (string?)null })).StatusCode);
+    }
+
+    /// <summary>Signs in with a password a second step is asked for: the ticket, whether it's to set one up, and the methods.</summary>
+    private async Task<(string Ticket, bool Enrol, string[] Methods)> ChallengeAsync(string username, string password)
+    {
+        HttpResponseMessage asked = await Client().PostAsJsonAsync("/api/guard/session", new { username, password });
+        Assert.Equal(HttpStatusCode.Unauthorized, asked.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await asked.Content.ReadAsStringAsync());
+        JsonElement step = body.RootElement.GetProperty("secondFactor");
+        return (step.GetProperty("ticket").GetString()!, step.GetProperty("enrol").GetBoolean(),
+            step.GetProperty("methods").EnumerateArray().Select(m => m.GetString()!).ToArray());
+    }
+
+    private static async Task<HttpResponseMessage> SendAsync(HttpClient client, string csrf, HttpMethod method, string path, object body)
+    {
+        using HttpRequestMessage request = new(method, path) { Content = JsonContent.Create(body) };
+        request.Headers.Add(CsrfHeader, csrf);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<Guid> IdAsync(HttpResponseMessage response)
+    {
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return body.RootElement.GetProperty("id").GetGuid();
+    }
+
     private static async Task AssertErrorAsync(HttpResponseMessage response, HttpStatusCode status, string code)
     {
         Assert.Equal(status, response.StatusCode);
