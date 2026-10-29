@@ -110,6 +110,11 @@ The version is `VersionPrefix` and `VersionSuffix` in `Directory.Build.props`, a
 it. Pushing the tag `v<version>`, such as `v0.1.0-preview.1`, runs the checks. GitHub Actions then pushes the packages
 to nuget.org and makes a GitHub release.
 
+Publishing uses nuget.org's Trusted Publishing, so no API key is stored anywhere: nuget.org gives the release job a key
+that lasts an hour. It needs a Trusted Publishing policy on nuget.org for this repository, the workflow file `ci.yml`
+and the environment `release`, and the repository variable `NUGET_USER` set to the nuget.org account that owns the
+packages.
+
 ## Contributing
 
 Issues and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md), and [SECURITY.md](SECURITY.md) for
