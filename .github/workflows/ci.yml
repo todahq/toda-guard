@@ -1,0 +1,74 @@
+# Pushes to main and pull requests run the checks: build, the unit tests, the integration tests against PostgreSQL
+# through the sample host, and pack. A v<version> tag runs them, then pushes the packages to nuget.org with the
+# NUGET_API_KEY secret and makes a GitHub release (see README.md, "Releasing").
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      GUARD_TEST_POSTGRES: "Host=localhost;Port=5432;Username=postgres;Password=postgres"
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-dotnet@v4.3.1
+        with:
+          dotnet-version: "10.0.x"
+      - run: bash scripts/check-release.sh
+      - run: dotnet build Toda.Guard.slnx -c Release
+      - run: dotnet test Toda.Guard.slnx -c Release --no-build
+      - run: dotnet pack Toda.Guard.slnx -c Release --no-build -o artifacts
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: packages
+          path: artifacts/
+
+  publish:
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-dotnet@v4.3.1
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: packages
+          path: artifacts/
+      - run: bash scripts/check-release.sh --tag "$GITHUB_REF_NAME" --unpublished
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" artifacts/* --title "$GITHUB_REF_NAME" --notes "See CHANGELOG.md for $GITHUB_REF_NAME." --verify-tag
