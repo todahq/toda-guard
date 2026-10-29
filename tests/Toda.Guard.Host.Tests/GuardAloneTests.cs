@@ -259,6 +259,14 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
             using HttpRequestMessage me = new(HttpMethod.Get, "/api/guard/me");
             me.Headers.Authorization = new("Bearer", secret);
             Assert.Equal(HttpStatusCode.OK, (await factory.CreateClient().SendAsync(me)).StatusCode);
+
+            // The host moves to a new prefix and keeps the old one accepted: the token made before still signs in.
+            Environment.SetEnvironmentVariable("Guard__Names__PersonalTokenPrefix", "acme2_pat_");
+            Environment.SetEnvironmentVariable("Guard__Names__AcceptedTokenPrefixes__0", "acme_pat_");
+            await using WebApplicationFactory<Program> moved = new();
+            using HttpRequestMessage again = new(HttpMethod.Get, "/api/guard/me");
+            again.Headers.Authorization = new("Bearer", secret);
+            Assert.Equal(HttpStatusCode.OK, (await moved.CreateClient().SendAsync(again)).StatusCode);
         }
         finally
         {
@@ -266,6 +274,8 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
             {
                 Environment.SetEnvironmentVariable(key, null);
             }
+
+            Environment.SetEnvironmentVariable("Guard__Names__AcceptedTokenPrefixes__0", null);
         }
     }
 

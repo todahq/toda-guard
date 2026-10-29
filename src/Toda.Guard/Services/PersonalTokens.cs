@@ -231,7 +231,8 @@ public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOpt
 
     /// <summary>Whether a request's bearer token is a personal access token (it goes to this handler, not to OpenIddict).</summary>
     public static bool Carries(Microsoft.AspNetCore.Http.HttpRequest request) =>
-        request.Headers.Authorization.ToString() is { } header && header.StartsWith("Bearer " + WebSessionHandler.Wire(request.HttpContext).PersonalTokenPrefix, StringComparison.Ordinal);
+        request.Headers.Authorization.ToString() is { } header && header.StartsWith("Bearer ", StringComparison.Ordinal)
+        && WebSessionHandler.Wire(request.HttpContext).IsPersonalToken(header["Bearer ".Length..]);
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {

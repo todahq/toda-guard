@@ -34,13 +34,24 @@ public sealed class GuardNames
     /// <summary>What the anti-forgery value is derived with, beside the session's secret.</summary>
     public string CsrfSalt { get; set; } = "toda-csrf:";
 
-    /// <summary>How a personal access token starts: what the sign-in recognises it by.</summary>
+    /// <summary>How a new personal access token starts, and one the sign-in recognises.</summary>
     public string PersonalTokenPrefix { get; set; } = "toda_pat_";
 
-    /// <summary>How an OAuth app's client id starts.</summary>
+    /// <summary>
+    /// How tokens issued before under another prefix start: recognised for as long as they live, never issued. A site
+    /// that changes <see cref="PersonalTokenPrefix"/> keeps the old one here (tokens live for months).
+    /// </summary>
+    public List<string> AcceptedTokenPrefixes { get; set; } = [];
+
+    /// <summary>Whether a bearer token is a personal access token: it starts with the prefix new ones get, or an accepted one.</summary>
+    public bool IsPersonalToken(string token) =>
+        token.StartsWith(PersonalTokenPrefix, StringComparison.Ordinal)
+        || AcceptedTokenPrefixes.Any(p => p.Length > 0 && token.StartsWith(p, StringComparison.Ordinal));
+
+    /// <summary>How a new OAuth app's client id starts (only made with it: an app is found by its whole id).</summary>
     public string AppIdPrefix { get; set; } = "toda_app_";
 
-    /// <summary>How an OAuth app's client secret starts.</summary>
+    /// <summary>How a new OAuth app's client secret starts (only made with it: a secret is checked whole).</summary>
     public string AppSecretPrefix { get; set; } = "toda_cs_";
 
     /// <summary>The property an OAuth app keeps its kind in (made by an admin, or registered by an agent).</summary>

@@ -69,6 +69,17 @@ public class GuardOptionsTests
     }
 
     [Fact]
+    public void A_token_with_the_prefix_or_an_accepted_one_is_a_personal_token()
+    {
+        GuardNames names = new() { PersonalTokenPrefix = "new_pat_", AcceptedTokenPrefixes = ["old_pat_"] };
+
+        Assert.True(names.IsPersonalToken("new_pat_abc"));
+        Assert.True(names.IsPersonalToken("old_pat_abc"));
+        Assert.False(names.IsPersonalToken("eyJhbGciOi"));
+        Assert.False(new GuardNames { AcceptedTokenPrefixes = [""] }.IsPersonalToken("eyJhbGciOi"));
+    }
+
+    [Fact]
     public void Guard_needs_ABPs_clock_in_UTC_and_says_so_otherwise()
     {
         Assert.Null(TodaGuardModule.ClockProblem(new Volo.Abp.Timing.AbpClockOptions { Kind = DateTimeKind.Utc }));
