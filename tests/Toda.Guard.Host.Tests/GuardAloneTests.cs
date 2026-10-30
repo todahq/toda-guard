@@ -16,6 +16,7 @@ namespace Toda.Guard.Host.Tests;
 /// a refusal is JSON whatever the client accepts.
 /// Needs Postgres: localhost:5432 (postgres/postgres), or the server GUARD_TEST_POSTGRES names.
 /// </summary>
+[Collection(SampleHost.Collection)]
 public sealed partial class GuardAloneTests : IAsyncLifetime
 {
     /// <summary>The Postgres server the test makes its database on: GUARD_TEST_POSTGRES, else Postgres's image defaults.</summary>

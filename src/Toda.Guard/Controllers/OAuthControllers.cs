@@ -58,7 +58,9 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb, IOptions<G
                 : Redirect("/login?next=" + Uri.EscapeDataString("/connect/authorize" + query));
         }
 
-        if (Acting.TokenId is not null)
+        // The browser's session only: any bearer token (the phone's or a script's from the token endpoint too) skips the
+        // session's anti-forgery check and the consent page.
+        if (Acting.TokenId is not null || User.Identity?.AuthenticationType != WebSessionHandler.SchemeName)
         {
             return Refuse(Errors.AccessDenied, "An app is allowed by the person at the browser, not with a token.");
         }

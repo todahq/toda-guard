@@ -171,7 +171,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         }
 
         Password(input.Password);
-        string name = string.IsNullOrWhiteSpace(input.DisplayName) ? email : input.DisplayName.Trim();
+        string name = string.IsNullOrWhiteSpace(input.DisplayName) ? email : DisplayNames.Check(input.DisplayName.Trim());
         if (name.Length > 200)
         {
             throw new UserFriendlyException("A name is at most 200 characters.");

@@ -48,12 +48,15 @@ public sealed partial class PickupGuardMessenger(IOptions<GuardOptions> options,
         GuardTemplateText text = template.Texts.TryGetValue(language ?? "", out GuardTemplateText? chosen) ? chosen : template.Texts["en"];
         Dictionary<string, object?> model = new(message.Model)
         {
-            ["recipient"] = new Dictionary<string, object?> { ["name"] = name ?? to, ["email"] = to },
+            ["recipient"] = new Dictionary<string, object?> { ["name"] = OneLine(name ?? to), ["email"] = OneLine(to) },
         };
 
         StringBuilder mail = new();
-        mail.Append("To: ").Append(name is { Length: > 0 } ? $"\"{name.Replace("\"", "", StringComparison.Ordinal)}\" <{to}>" : to).Append("\r\n");
-        mail.Append("Subject: ").Append(Render(text.Subject ?? template.Names["en"], model)).Append("\r\n");
+        // A header is one line: a name, an address or a subject with a line break in it would start headers of its own.
+        string address = OneLine(to).Replace("<", "", StringComparison.Ordinal).Replace(">", "", StringComparison.Ordinal);
+        string? shown = name is { Length: > 0 } ? OneLine(name).Replace("\"", "", StringComparison.Ordinal).Replace("\\", "", StringComparison.Ordinal) : null;
+        mail.Append("To: ").Append(shown is { Length: > 0 } ? $"\"{shown}\" <{address}>" : address).Append("\r\n");
+        mail.Append("Subject: ").Append(OneLine(Render(text.Subject ?? template.Names["en"], model))).Append("\r\n");
         mail.Append("Content-Type: text/plain; charset=utf-8\r\n");
         mail.Append("X-Guard-Kind: ").Append(message.Kind).Append("\r\n\r\n");
         mail.Append(Render(text.Body, model)).Append("\r\n");
@@ -63,6 +66,17 @@ public sealed partial class PickupGuardMessenger(IOptions<GuardOptions> options,
         await File.WriteAllTextAsync(file, mail.ToString(), Encoding.UTF8, cancellationToken);
         return new GuardSendResult(1, 0);
     }
+
+    /// <summary>The text on one line: each control character, and Unicode's line and paragraph separators, a space.</summary>
+    public static string OneLine(string text) =>
+        string.Create(text.Length, text, static (span, source) =>
+        {
+            for (int i = 0; i < source.Length; i++)
+            {
+                char c = source[i];
+                span[i] = char.IsControl(c) || c is '\u2028' or '\u2029' ? ' ' : c;
+            }
+        });
 
     /// <summary>Each <c>{{ name }}</c> or <c>{{ a.b }}</c> with its value from the model; one that isn't there is left empty.</summary>
     public static string Render(string text, IReadOnlyDictionary<string, object?> model) =>

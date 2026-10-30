@@ -82,7 +82,7 @@ public class ServiceAccountMaker(GuardDb guardDb, AccountProjector projector, Se
             // No password and no address: it can't sign in, and no reset or mail reaches it.
             db.DirectoryUsers.Add(new DirectoryUser(Guid.NewGuid(), GuardConstants.InternalDirectoryId, $"internal:{normalized}", username)
             {
-                DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? username : input.DisplayName.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? username : DisplayNames.Check(input.DisplayName.Trim()),
             });
             await db.SaveChangesAsync(cancellationToken);
             List<object> raised = await projector.RebuildAsync(db, [normalized], cancellationToken);

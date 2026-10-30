@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
@@ -113,7 +114,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
             DirectoryUser user = new(Guid.NewGuid(), directoryId, $"internal:{normalized}", input.Username)
             {
-                DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? input.Username : input.DisplayName.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? input.Username : DisplayNames.Check(input.DisplayName.Trim()),
                 Email = input.Email?.Trim(),
             };
             user.PasswordHash = AuthService.HashPassword(user, input.Password);
@@ -167,7 +168,9 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
             throw new UserFriendlyException("You can't reset your own second factors. Remove them from your profile, or ask another admin.");
         }
 
-        Ensure(await AbilityAsync(cancellationToken), "reset-second-factor", await AccountAsync(id, cancellationToken));
+        Casl.Ability ability = await AbilityAsync(cancellationToken);
+        Ensure(ability, "reset-second-factor", await AccountAsync(id, cancellationToken));
+        await EnsureNotAnAdminAsync(ability, id, "reset the second factors of", cancellationToken);
         await secondFactors.ResetAsync(id, cancellationToken);
         return NoContent();
     }
@@ -180,6 +183,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         }
 
         Casl.Ability ability = await AbilityAsync(cancellationToken);
+        await EnsureNotAnAdminAsync(ability, id, locked ? "lock" : "unlock", cancellationToken);
         (AccountDto dto, List<object> events) = await guardDb.RunAsync(async db =>
         {
             Account account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == id, cancellationToken)
@@ -208,6 +212,18 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         return dto;
     }
 
+    /// <summary>
+    /// A right short of an admin's (a helpdesk's) doesn't reach an account with an admin's rights: locking one ends its
+    /// every session, and unlocking one an admin locked would undo them.
+    /// </summary>
+    private async Task EnsureNotAnAdminAsync(Casl.Ability ability, Guid id, string what, CancellationToken cancellationToken)
+    {
+        if (!ability.Can("manage", "all") && await HttpContext.RequestServices.GetRequiredService<AbilityFactory>().HoldsAdminRightsAsync(id, cancellationToken))
+        {
+            throw new UserFriendlyException($"Only an administrator can {what} an administrator.", GuardErrorCodes.Forbidden);
+        }
+    }
+
     // ---- Addresses (ADR 0044): an admin's are verified at once ----
 
     [HttpGet("{id:guid}/emails")]
@@ -217,8 +233,13 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         return await emails.ListAsync(id, cancellationToken);
     }
 
-    /// <summary>Adds an address, verified; a placeholder with it is merged into this account.</summary>
+    /// <summary>
+    /// Adds an address, verified; a placeholder with it is merged into this account. Admins only: a verified address
+    /// receives password resets and counts for email-domain organizations, so a right to update an account, or one's
+    /// own, isn't enough (a person adds their own at /me/emails, through a mailed link).
+    /// </summary>
     [HttpPost("{id:guid}/emails")]
+    [Authorize(Policy = GuardPolicies.Admin)]
     [StepUp]
     public async Task<AccountEmailsDto> AddEmail(Guid id, [FromBody] AddEmailInput input, CancellationToken cancellationToken)
     {
@@ -231,6 +252,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     }
 
     [HttpDelete("{id:guid}/emails/{emailId:guid}")]
+    [Authorize(Policy = GuardPolicies.Admin)]
     public async Task<AccountEmailsDto> RemoveEmail(Guid id, Guid emailId, CancellationToken cancellationToken)
     {
         Account account = await AccountAsync(id, cancellationToken);
@@ -243,6 +265,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
     /// <summary>Where mail goes: one of the account's verified addresses, or null for its directory's.</summary>
     [HttpPut("{id:guid}/mail-to")]
+    [Authorize(Policy = GuardPolicies.Admin)]
     [StepUp]
     public async Task<AccountEmailsDto> MailTo(Guid id, [FromBody] MailToInput input, CancellationToken cancellationToken)
     {
@@ -286,11 +309,34 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         return await merges.MergeAsync(id, input.SurvivorId, CurrentAccountId, MergeReasons.Admin, input.Confirm, cancellationToken);
     }
 
+    /// <summary>
+    /// A merge moves the source's grants and the memberships added in Toda to the survivor, so a merge right short of an
+    /// admin's can't make oneself the survivor, nor merge an account that holds either: that would hand over rights the
+    /// merger may not give.
+    /// </summary>
     private async Task EnsureMergeAsync(Guid sourceId, Guid survivorId, CancellationToken cancellationToken)
     {
         Casl.Ability ability = await AbilityAsync(cancellationToken);
         Ensure(ability, "merge", await AccountAsync(sourceId, cancellationToken));
         Ensure(ability, "merge", await AccountAsync(survivorId, cancellationToken));
+        if (ability.Can("manage", "all"))
+        {
+            return;
+        }
+
+        if (survivorId == CurrentAccountId)
+        {
+            throw new UserFriendlyException("Only an administrator can merge another account into their own.", GuardErrorCodes.Forbidden);
+        }
+
+        bool holdsRights = await guardDb.RunAsync(async db =>
+            await db.RoleGrants.AnyAsync(g => g.PrincipalType == PrincipalType.Account && g.PrincipalId == sourceId, cancellationToken)
+            || await db.Memberships.AnyAsync(m => m.MemberType == MemberType.Account && m.MemberId == sourceId && m.Source == MembershipSource.Manual, cancellationToken),
+            cancellationToken: cancellationToken);
+        if (holdsRights)
+        {
+            throw new UserFriendlyException("This account has roles or groups of its own: only an administrator can merge it.", GuardErrorCodes.Forbidden);
+        }
     }
 
     private static AuditTarget Target(Account account) => new("Account", account.Id, account.Username);

@@ -186,8 +186,12 @@ public sealed class SecondFactors(
                 await limits.ResetAsync(WrongKey(account.Id), cancellationToken);
             }
 
-            db.SignInTickets.Remove(row);
-            await db.SaveChangesAsync(cancellationToken);
+            // The ticket passes once: of two passes at once, only the one that removes it.
+            if (await db.SignInTickets.Where(t => t.Id == row.Id).ExecuteDeleteAsync(cancellationToken) == 0)
+            {
+                return (null, account.Id, account.Username, "ticket");
+            }
+
             return (new SecondStepPassed(account.Id, row.Client, row.Scopes), account.Id, account.Username, null);
         }, requiresNew: true, cancellationToken);
 
@@ -541,15 +545,9 @@ public sealed class SecondFactors(
         if (method == SecondFactorKinds.Recovery)
         {
             string hash = Hash(NormalizeRecovery(code));
-            RecoveryCode? recovery = await db.RecoveryCodes.FirstOrDefaultAsync(c => c.AccountId == accountId && c.UsedAt == null && c.Hash == hash, cancellationToken);
-            if (recovery is null)
-            {
-                return false;
-            }
-
-            recovery.UsedAt = now;
-            await db.SaveChangesAsync(cancellationToken);
-            return true;
+            // Used once: of two uses at once, only the one whose update finds it still unused.
+            return await db.RecoveryCodes.Where(c => c.AccountId == accountId && c.UsedAt == null && c.Hash == hash)
+                .ExecuteUpdateAsync(c => c.SetProperty(x => x.UsedAt, now), cancellationToken) > 0;
         }
 
         // A code sent by email or a channel: the last one for the method, unused, within its ten minutes, while the site
@@ -562,16 +560,8 @@ public sealed class SecondFactors(
             }
 
             string hash = CodeHash(accountId, method!, new string([.. (code ?? "").Where(char.IsAsciiDigit)]));
-            SentCode? sent = await db.SentCodes.FirstOrDefaultAsync(c => c.AccountId == accountId && c.Method == method && c.UsedAt == null && c.ExpiresAt > now
-                && c.CodeHash == hash, cancellationToken);
-            if (sent is null)
-            {
-                return false;
-            }
-
-            sent.UsedAt = now;
-            await db.SaveChangesAsync(cancellationToken);
-            return true;
+            return await db.SentCodes.Where(c => c.AccountId == accountId && c.Method == method && c.UsedAt == null && c.ExpiresAt > now && c.CodeHash == hash)
+                .ExecuteUpdateAsync(c => c.SetProperty(x => x.UsedAt, now), cancellationToken) > 0;
         }
 
         if (method != SecondFactorKinds.App || (strong && !SecondFactorKinds.IsStrong(method)))
@@ -582,10 +572,11 @@ public sealed class SecondFactors(
         foreach (SecondFactor factor in await db.SecondFactors.Where(f => f.AccountId == accountId && f.Kind == SecondFactorKinds.App && f.ConfirmedAt != null)
                      .ToListAsync(cancellationToken))
         {
-            if (factor.ProtectedSecret is { } secret && Totp.Verify(Totp.FromBase32(Protector.Unprotect(secret)), code, now, factor.LastStep) is { } step)
+            // A step passes once: the update finds the factor still before it only for the first of two uses at once.
+            if (factor.ProtectedSecret is { } secret && Totp.Verify(Totp.FromBase32(Protector.Unprotect(secret)), code, now, factor.LastStep) is { } step
+                && await db.SecondFactors.Where(f => f.Id == factor.Id && f.LastStep < step)
+                    .ExecuteUpdateAsync(f => f.SetProperty(x => x.LastStep, step).SetProperty(x => x.LastUsedAt, now), cancellationToken) > 0)
             {
-                (factor.LastStep, factor.LastUsedAt) = (step, now);
-                await db.SaveChangesAsync(cancellationToken);
                 return true;
             }
         }

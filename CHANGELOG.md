@@ -20,6 +20,25 @@ change the API.
   from its limits before a code is made, so requests sent at once can't go past a limit. A wrong password for a merged
   account counts toward the limit as any other.
 - A security event keeps at most 256 characters of the username it was given.
+- A recovery code, an emailed code, an authenticator's step and a sign-in ticket each pass once, however many requests
+  use them together.
+- The default messenger writes each header on one line: a name, address or subject with a line break no longer starts
+  a header of its own.
+
+### Changed
+
+- Adding, removing or choosing an account's addresses (`POST /api/guard/accounts/{id}/emails`,
+  `DELETE …/emails/{emailId}`, `PUT …/mail-to`) needs the Admin policy; an `update` right on accounts no longer
+  reaches them. A person adds their own at `/api/guard/me/emails`, through a mailed link. **Breaking** for a host whose
+  roles relied on `update`.
+- Merging an account with a right short of an admin's is refused when the merger would be the survivor, or the account
+  merged away holds grants or memberships added in Guard.
+- Locking, unlocking or resetting the second factors of an account with an administrator's rights needs an
+  administrator, whatever the actor's role says (the seeded Directory helpdesk's included).
+- Allowing an app at `/connect/authorize` takes the browser's session: any bearer token is refused, the phone's and
+  scripts' from the token endpoint too.
+- Display names with a line break or another control character are refused at sign-up, and when an admin creates an
+  account or a service account.
 
 ## [0.1.0-preview.1] - 2026-10-29
 
