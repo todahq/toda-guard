@@ -350,28 +350,45 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 [Route("api/guard/merges")]
 [Authorize]
 [GuardFeature(nameof(GuardFeatures.Merges))]
-public class MergesController(AccountMergeService merges) : GuardControllerBase
+public class MergesController(AccountMergeService merges, GuardDb guardDb) : GuardControllerBase
 {
+    /// <summary>The merges the caller may see: an admin's are all; a narrower merge right's, those of accounts it may merge.</summary>
     [HttpGet]
     public async Task<List<AccountMergeDto>> List([FromQuery] Guid? accountId, [FromQuery] int take = 100, CancellationToken cancellationToken = default)
     {
-        Ensure(await AbilityAsync(cancellationToken), "merge", "Account");
-        return await merges.ListAsync(accountId, take, cancellationToken);
+        Casl.Ability ability = await AbilityAsync(cancellationToken);
+        Ensure(ability, "merge", "Account");
+        return await merges.ListAsync(accountId, take, cancellationToken, ability.Can("manage", "all") ? null : ability);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<AccountMergeDto> Get(Guid id, CancellationToken cancellationToken)
     {
-        Ensure(await AbilityAsync(cancellationToken), "merge", "Account");
-        return await merges.GetAsync(id, cancellationToken);
+        AccountMergeDto merge = await merges.GetAsync(id, cancellationToken);
+        await EnsureBothAsync(merge, cancellationToken);
+        return merge;
     }
 
     /// <summary>Asks the plugins that haven't finished the merge (they failed, or were off) to move their rows now.</summary>
     [HttpPost("{id:guid}/resume")]
+    [StepUp]
     public async Task<AccountMergeDto> Resume(Guid id, CancellationToken cancellationToken)
     {
-        Ensure(await AbilityAsync(cancellationToken), "merge", "Account");
+        await EnsureBothAsync(await merges.GetAsync(id, cancellationToken), cancellationToken);
         return await merges.ResumeAsync(id, cancellationToken);
+    }
+
+    /// <summary>403 unless the caller may merge both of the merge's accounts, as it took to start it.</summary>
+    private async Task EnsureBothAsync(AccountMergeDto merge, CancellationToken cancellationToken)
+    {
+        Casl.Ability ability = await AbilityAsync(cancellationToken);
+        List<Account> accounts = await guardDb.RunAsync(db => db.Accounts.AsNoTracking().Where(a => a.Id == merge.SourceId || a.Id == merge.SurvivorId).ToListAsync(cancellationToken),
+            cancellationToken: cancellationToken);
+        Ensure(ability, "merge", "Account");
+        foreach (Account account in accounts)
+        {
+            Ensure(ability, "merge", account);
+        }
     }
 }
 

@@ -224,7 +224,8 @@ public class PersonalTokens(GuardDb guardDb, SecurityLog audit, IEnumerable<IGra
 /// Signs in a request that carries a personal access token as its bearer token: the token's account, with the token's
 /// id, access and projects as claims for the acting context. There's no <c>auth_time</c>, so it never passes a step-up.
 /// </summary>
-public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder, PersonalTokens tokens)
+public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder, PersonalTokens tokens,
+    IOptions<GuardOptions> guard)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "TodaToken";
@@ -239,6 +240,12 @@ public sealed class PersonalTokenHandler(IOptionsMonitor<AuthenticationSchemeOpt
         if (!Carries(Request))
         {
             return AuthenticateResult.NoResult();
+        }
+
+        // Switched off, the tokens go with their endpoints: none issued before still signs in, with no page left to revoke it.
+        if (!guard.Value.Features.PersonalTokens)
+        {
+            return AuthenticateResult.Fail("Personal access tokens are switched off on this site.");
         }
 
         string secret = Request.Headers.Authorization.ToString()["Bearer ".Length..].Trim();
