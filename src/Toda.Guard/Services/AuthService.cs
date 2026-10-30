@@ -17,19 +17,33 @@ public class LoginRateLimiter(IGuardRateLimits limits) : ISingletonDependency
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(15);
 
     public async Task<bool> IsBlockedAsync(string username, string? ip, CancellationToken cancellationToken = default) =>
-        await limits.CountAsync($"sign-in|u:{username}", Window, cancellationToken) >= MaxFailures
-        || (ip is not null && await limits.CountAsync($"sign-in|ip:{ip}", Window, cancellationToken) >= MaxFailures * 4);
+        await limits.CountAsync(UserKey(username), Window, cancellationToken) >= MaxFailures || await IpBlockedAsync(ip, cancellationToken);
 
-    public async Task RecordFailureAsync(string username, string? ip, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Takes one of the username's tries before its password is checked; false when it has none left or the IP is
+    /// blocked. Taken first, so guesses sent at once can't all be checked before the first failure counts. A right
+    /// password gives the tries back (<see cref="ResetAsync"/>).
+    /// </summary>
+    public async Task<bool> TryBeginAsync(string username, string? ip, CancellationToken cancellationToken = default) =>
+        !await IpBlockedAsync(ip, cancellationToken) && await limits.TryTakeAsync(UserKey(username), MaxFailures, Window, cancellationToken);
+
+    /// <summary>A failure after <see cref="TryBeginAsync"/>, which counted it for the username already: counted for the IP.</summary>
+    public async Task RecordFailureAsync(string? ip, CancellationToken cancellationToken = default)
     {
-        await limits.AddAsync($"sign-in|u:{username}", cancellationToken);
         if (ip is not null)
         {
-            await limits.AddAsync($"sign-in|ip:{ip}", cancellationToken);
+            await limits.AddAsync(IpKey(ip), cancellationToken);
         }
     }
 
-    public Task ResetAsync(string username, CancellationToken cancellationToken = default) => limits.ResetAsync($"sign-in|u:{username}", cancellationToken);
+    private async Task<bool> IpBlockedAsync(string? ip, CancellationToken cancellationToken) =>
+        ip is not null && await limits.CountAsync(IpKey(ip), Window, cancellationToken) >= MaxFailures * 4;
+
+    private static string UserKey(string username) => $"sign-in|u:{username}";
+
+    private static string IpKey(string ip) => $"sign-in|ip:{ip}";
+
+    public Task ResetAsync(string username, CancellationToken cancellationToken = default) => limits.ResetAsync(UserKey(username), cancellationToken);
 }
 
 /// <summary>Credential check only. Tokens are issued by the OpenIddict token endpoint (ADR 0007).</summary>
@@ -51,7 +65,7 @@ public class AuthService(
     public async Task<LoginResult> LoginAsync(string username, string password, string? ip, CancellationToken cancellationToken = default)
     {
         string normalized = GuardConstants.Normalize(username);
-        if (await limiter.IsBlockedAsync(normalized, ip, cancellationToken))
+        if (!await limiter.TryBeginAsync(normalized, ip, cancellationToken))
         {
             await AuditAsync("auth.login.blocked", normalized, null, "Too many failed attempts", ip, cancellationToken);
             return new LoginResult(false, null, "too_many_attempts");
@@ -94,10 +108,10 @@ public class AuthService(
 
         if (!ok)
         {
-            // Account-state failures don't count toward the brute-force limit; wrong passwords do.
+            // The username's try was taken before the check; wrong passwords count for the IP too, account-state failures don't.
             if (reason is "wrong_password" or "user_not_found" or "invalid_credentials")
             {
-                await limiter.RecordFailureAsync(normalized, ip, cancellationToken);
+                await limiter.RecordFailureAsync(ip, cancellationToken);
             }
 
             await AuditAsync("auth.login.failed", normalized, account?.Id, reason, ip, cancellationToken);
@@ -111,15 +125,23 @@ public class AuthService(
         return new LoginResult(true, account, null);
     }
 
-    /// <summary>"account_merged:{survivor}" when the password is the merged account's own; otherwise "account_inactive".</summary>
+    /// <summary>
+    /// "account_merged:{survivor}" when the password is the merged account's own; a wrong one is a wrong password, counted
+    /// as at any sign-in; otherwise "account_inactive".
+    /// </summary>
     private async Task<string> MergedAsync(GuardDbContext db, Account account, Guid survivorId, string password, CancellationToken cancellationToken)
     {
         UserDirectory? directory = await db.Directories.FirstOrDefaultAsync(d => d.Id == account.DirectoryId, cancellationToken);
         DirectoryUser? record = await db.DirectoryUsers.FirstOrDefaultAsync(u => u.DirectoryId == account.DirectoryId && u.NormalizedUsername == account.NormalizedUsername,
             cancellationToken);
-        if (directory is not { IsActive: true, AuthenticationEnabled: true } || record is null || !(await AuthenticateAsync(directory, record, password)).Succeeded)
+        if (directory is not { IsActive: true, AuthenticationEnabled: true } || record is null)
         {
             return "account_inactive";
+        }
+
+        if (!(await AuthenticateAsync(directory, record, password)).Succeeded)
+        {
+            return "wrong_password";
         }
 
         string? survivor = await db.Accounts.Where(a => a.Id == survivorId).Select(a => a.Username).FirstOrDefaultAsync(cancellationToken);
@@ -140,7 +162,7 @@ public class AuthService(
                 return (account, "account_inactive");
             }
 
-            return (account, await limiter.IsBlockedAsync(account.NormalizedUsername, ip, cancellationToken)
+            return (account, !await limiter.TryBeginAsync(account.NormalizedUsername, ip, cancellationToken)
                 ? "too_many_attempts"
                 : await CheckPasswordAsync(db, account, password, cancellationToken));
         }, cancellationToken: cancellationToken);
@@ -155,7 +177,7 @@ public class AuthService(
 
         if (username is not null && refused is "wrong_password" or "invalid_credentials")
         {
-            await limiter.RecordFailureAsync(username, ip, cancellationToken);
+            await limiter.RecordFailureAsync(ip, cancellationToken);
         }
 
         bool end = refused is "account_inactive" or "directory_inactive" or "directory_signin_disabled"
