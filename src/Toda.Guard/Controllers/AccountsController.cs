@@ -217,8 +217,13 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         return await emails.ListAsync(id, cancellationToken);
     }
 
-    /// <summary>Adds an address, verified; a placeholder with it is merged into this account.</summary>
+    /// <summary>
+    /// Adds an address, verified; a placeholder with it is merged into this account. Admins only: a verified address
+    /// receives password resets and counts for email-domain organizations, so a right to update an account, or one's
+    /// own, isn't enough (a person adds their own at /me/emails, through a mailed link).
+    /// </summary>
     [HttpPost("{id:guid}/emails")]
+    [Authorize(Policy = GuardPolicies.Admin)]
     [StepUp]
     public async Task<AccountEmailsDto> AddEmail(Guid id, [FromBody] AddEmailInput input, CancellationToken cancellationToken)
     {
@@ -231,6 +236,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     }
 
     [HttpDelete("{id:guid}/emails/{emailId:guid}")]
+    [Authorize(Policy = GuardPolicies.Admin)]
     public async Task<AccountEmailsDto> RemoveEmail(Guid id, Guid emailId, CancellationToken cancellationToken)
     {
         Account account = await AccountAsync(id, cancellationToken);
@@ -243,6 +249,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
     /// <summary>Where mail goes: one of the account's verified addresses, or null for its directory's.</summary>
     [HttpPut("{id:guid}/mail-to")]
+    [Authorize(Policy = GuardPolicies.Admin)]
     [StepUp]
     public async Task<AccountEmailsDto> MailTo(Guid id, [FromBody] MailToInput input, CancellationToken cancellationToken)
     {
@@ -286,11 +293,34 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         return await merges.MergeAsync(id, input.SurvivorId, CurrentAccountId, MergeReasons.Admin, input.Confirm, cancellationToken);
     }
 
+    /// <summary>
+    /// A merge moves the source's grants and the memberships added in Toda to the survivor, so a merge right short of an
+    /// admin's can't make oneself the survivor, nor merge an account that holds either: that would hand over rights the
+    /// merger may not give.
+    /// </summary>
     private async Task EnsureMergeAsync(Guid sourceId, Guid survivorId, CancellationToken cancellationToken)
     {
         Casl.Ability ability = await AbilityAsync(cancellationToken);
         Ensure(ability, "merge", await AccountAsync(sourceId, cancellationToken));
         Ensure(ability, "merge", await AccountAsync(survivorId, cancellationToken));
+        if (ability.Can("manage", "all"))
+        {
+            return;
+        }
+
+        if (survivorId == CurrentAccountId)
+        {
+            throw new UserFriendlyException("Only an administrator can merge another account into their own.", GuardErrorCodes.Forbidden);
+        }
+
+        bool holdsRights = await guardDb.RunAsync(async db =>
+            await db.RoleGrants.AnyAsync(g => g.PrincipalType == PrincipalType.Account && g.PrincipalId == sourceId, cancellationToken)
+            || await db.Memberships.AnyAsync(m => m.MemberType == MemberType.Account && m.MemberId == sourceId && m.Source == MembershipSource.Manual, cancellationToken),
+            cancellationToken: cancellationToken);
+        if (holdsRights)
+        {
+            throw new UserFriendlyException("This account has roles or groups of its own: only an administrator can merge it.", GuardErrorCodes.Forbidden);
+        }
     }
 
     private static AuditTarget Target(Account account) => new("Account", account.Id, account.Username);

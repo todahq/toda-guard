@@ -6,6 +6,20 @@ change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- Adding, removing or choosing an account's addresses (`POST /api/guard/accounts/{id}/emails`,
+  `DELETE …/emails/{emailId}`, `PUT …/mail-to`) needs the Admin policy; an `update` right on accounts no longer
+  reaches them. A person adds their own at `/api/guard/me/emails`, through a mailed link. **Breaking** for a host whose
+  roles relied on `update`.
+- Merging an account with a right short of an admin's is refused when the merger would be the survivor, or the account
+  merged away holds grants or memberships added in Guard.
+
+### Fixed
+
+- A sign-in ticket sets up an authenticator app only when the person has no way through the second step; when the site
+  sends them codes, the step asks for one.
+
 ## [0.1.0-preview.1] - 2026-10-29
 
 Extracted from Toda at 19563f7d, with its history for these paths. The first version as packages on nuget.org:

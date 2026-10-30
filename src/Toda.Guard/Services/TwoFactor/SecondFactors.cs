@@ -110,17 +110,14 @@ public sealed class SecondFactors(
         {
             Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == accountId, cancellationToken);
             string mode = await ModeAsync(db, account, cancellationToken);
-            List<string> kinds = await db.SecondFactors.AsNoTracking().Where(f => f.AccountId == accountId && f.ConfirmedAt != null).Select(f => f.Kind)
-                .Distinct().ToListAsync(cancellationToken);
+            List<string> kinds = await KindsAsync(db, accountId, cancellationToken);
             if (Disabled || (!TwoFactorModes.Asks(mode) && kinds.Count == 0))
             {
                 return null;
             }
 
-            // The app first; then the codes the site sends, by what reaches the person, unless a strong group asks for the app.
             bool strong = mode == TwoFactorModes.Strong;
-            List<SecondFactorSenderDto> senders = strong ? [] : await SendersAsync(db, account, cancellationToken);
-            List<string> methods = [.. kinds.Where(k => !strong || SecondFactorKinds.IsStrong(k)).Order(StringComparer.Ordinal), .. senders.Select(s => s.Method)];
+            (List<string> methods, List<SecondFactorSenderDto> senders) = await MethodsAsync(db, account, kinds, strong, cancellationToken);
             // Recovery codes stand in for a factor; listed only where the host's clients read them (GuardOptions.TwoFactor).
             if (options.Value.TwoFactor.ListsRecovery && methods.Count > 0
                 && await db.RecoveryCodes.AnyAsync(c => c.AccountId == accountId && c.UsedAt == null, cancellationToken))
@@ -299,7 +296,8 @@ public sealed class SecondFactors(
 
     /// <summary>
     /// The account a ticket may set up a second factor for; null when it can't: used, expired, out of tries, or the person
-    /// has one already (the ticket would otherwise pass the step without it).
+    /// has a way through the step already, a factor of theirs or a code the site sends (the ticket would otherwise pass
+    /// the step without it). The same test as the challenge's <c>Enrol</c>.
     /// </summary>
     public Task<Guid?> TicketAccountAsync(string ticket, CancellationToken cancellationToken)
     {
@@ -309,11 +307,37 @@ public sealed class SecondFactors(
         {
             var row = await db.SignInTickets.AsNoTracking().Where(t => t.TicketHash == hash).Select(t => new { t.AccountId, t.ExpiresAt, t.Attempts, t.ProvedAt })
                 .FirstOrDefaultAsync(cancellationToken);
-            return row is not null && row.ExpiresAt > now && row.Attempts < SignInTicket.MaxAttempts && row.ProvedAt is null
-                && !await db.SecondFactors.AnyAsync(f => f.AccountId == row.AccountId && f.ConfirmedAt != null, cancellationToken)
-                ? row.AccountId
-                : (Guid?)null;
+            if (row is null || row.ExpiresAt <= now || row.Attempts >= SignInTicket.MaxAttempts || row.ProvedAt is not null)
+            {
+                return (Guid?)null;
+            }
+
+            List<string> kinds = await KindsAsync(db, row.AccountId, cancellationToken);
+            if (kinds.Count > 0)
+            {
+                return null;
+            }
+
+            Account account = await db.Accounts.AsNoTracking().FirstAsync(a => a.Id == row.AccountId, cancellationToken);
+            bool strong = await ModeAsync(db, account, cancellationToken) == TwoFactorModes.Strong;
+            return (await MethodsAsync(db, account, kinds, strong, cancellationToken)).Methods.Count == 0 ? row.AccountId : null;
         }, cancellationToken: cancellationToken);
+    }
+
+    private static Task<List<string>> KindsAsync(GuardDbContext db, Guid accountId, CancellationToken cancellationToken) =>
+        db.SecondFactors.AsNoTracking().Where(f => f.AccountId == accountId && f.ConfirmedAt != null).Select(f => f.Kind)
+            .Distinct().ToListAsync(cancellationToken);
+
+    /// <summary>
+    /// The methods the second step takes: the app first; then the codes the site sends, by what reaches the person,
+    /// unless a strong group asks for the app. Empty means the person must set one up first.
+    /// </summary>
+    private async Task<(List<string> Methods, List<SecondFactorSenderDto> Senders)> MethodsAsync(GuardDbContext db, Account account, List<string> kinds, bool strong,
+        CancellationToken cancellationToken)
+    {
+        List<SecondFactorSenderDto> senders = strong ? [] : await SendersAsync(db, account, cancellationToken);
+        List<string> methods = [.. kinds.Where(k => !strong || SecondFactorKinds.IsStrong(k)).Order(StringComparer.Ordinal), .. senders.Select(s => s.Method)];
+        return (methods, senders);
     }
 
     /// <summary>A second factor was set up with this ticket: the step is proved, and the next exchange needs no code.</summary>
