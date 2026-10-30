@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Toda.Guard.Acting;
 using Toda.Guard.Data;
 using Toda.Guard.Domain;
 using Volo.Abp;
@@ -220,7 +221,8 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
             return record;
         }, requiresNew: true, ct, isTransactional: true);
 
-        // The link confirms this sign-up only: another for the same address sets another password, and this one stops working.
+        // Bound to the password this sign-up set, as a reset link is: signing up again sets another, and the links mailed
+        // before stop working, so following one can't confirm a password someone else chose since.
         string token = Verifier.Protect($"{user.Id:N}:{Stamp(user)}", VerifyFor);
         // The link in the language the person signed up in.
         string link = GuardPageOptions.Link(Site, options.Value.Pages.SignUpVerify, siteDefaults.RequestLanguage);
@@ -230,8 +232,23 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
     /// <summary>Confirms a sign-up's email: the account becomes active, and joins organizations by its domain. Returns its username.</summary>
     public async Task<(string Username, List<object> Events)> VerifyAsync(string token, CancellationToken ct)
     {
-        const string Broken = "This link doesn't work: it's wrong, more than three days old, or there was a newer sign-up for this email. Use the newest link, or sign up again.";
-        (Guid id, string stamp) = Unprotect(Verifier, token, Broken);
+        const string Broken = "This link doesn't work: it's wrong, or more than three days old. Sign up again for a new one.";
+        string payload;
+        try
+        {
+            payload = Verifier.Unprotect(token ?? "");
+        }
+        catch (CryptographicException)
+        {
+            throw new UserFriendlyException(Broken);
+        }
+
+        string[] parts = payload.Split(':');
+        if (parts.Length != 2 || !Guid.TryParseExact(parts[0], "N", out Guid id))
+        {
+            throw new UserFriendlyException(Broken);
+        }
+
         (string Username, List<object> Events) verified = await guardDb.RunAsync(async db =>
         {
             DirectoryUser user = await db.DirectoryUsers.FirstOrDefaultAsync(u => u.Id == id, ct)
@@ -241,9 +258,9 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
                 return (user.Username, new List<object>()); // confirmed already: following the link again does nothing
             }
 
-            if (Stamp(user) != stamp)
+            if (Stamp(user) != parts[1])
             {
-                throw new UserFriendlyException(Broken);
+                throw new UserFriendlyException("This link was replaced by a newer one: use the latest email, or sign up again.");
             }
 
             user.PendingSince = null;
@@ -354,7 +371,11 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         }
     }
 
-    /// <summary>Sets a new password from a reset link; the link stops working once it has.</summary>
+    /// <summary>
+    /// Sets a new password from a reset link; the link stops working once it has. A reset is how a person takes their
+    /// account back, so what was signed in with the old password ends: browsers, the phone app and scripts, and access
+    /// tokens. Apps they allowed stay, as when they sign out everywhere.
+    /// </summary>
     public async Task<string> ResetAsync(string token, string password, CancellationToken ct)
     {
         Password(password);
@@ -369,7 +390,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         }
 
         string[] parts = payload.Split(':');
-        (string username, Guid? accountId) = await guardDb.RunAsync(async db =>
+        (string username, Guid? accountId) = await guardDb.RunAsync<(string, Guid?)>(async db =>
         {
             DirectoryUser? user = parts.Length == 2 && Guid.TryParse(parts[0], out Guid id) ? await db.DirectoryUsers.FirstOrDefaultAsync(u => u.Id == id, ct) : null;
             if (user is null || Stamp(user) != parts[1] || !user.IsActive)
@@ -378,15 +399,22 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
             }
 
             user.PasswordHash = AuthService.HashPassword(user, password);
-            await db.SaveChangesAsync(ct);
-            Guid? accountId = await db.Accounts.Where(a => a.NormalizedUsername == user.NormalizedUsername).Select(a => (Guid?)a.Id).FirstOrDefaultAsync(ct);
-            return (user.Username, accountId);
-        }, requiresNew: true, ct);
+            Guid? accountId = await db.Accounts.Where(a => a.DirectoryUserId == user.Id).Select(a => (Guid?)a.Id).FirstOrDefaultAsync(ct);
+            if (accountId is { } owner)
+            {
+                DateTime now = DateTime.UtcNow;
+                await db.PersonalAccessTokens.Where(t => t.AccountId == owner && t.RevokedAt == null)
+                    .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, now).SetProperty(t => t.RevokedBy, owner), ct);
+            }
 
-        // Whoever knew the old password is signed out: a reset is how a person takes their account back.
-        if (accountId is { } id)
+            audit.Add(db, SecurityAuditTypes.PasswordReset, new AuditTarget("Account", accountId, user.Username));
+            await db.SaveChangesAsync(ct);
+            return (user.Username, accountId);
+        }, requiresNew: true, ct, isTransactional: true);
+
+        if (accountId is { } account)
         {
-            await sessions.EndEverywhereAsync(id, keepSession: null, keepAuthorization: null, "password-reset", ct);
+            await sessions.EndEverywhereAsync(account, null, null, "password-reset", ct);
         }
 
         return username;
@@ -404,22 +432,8 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         }
     }
 
-    /// <summary>Changes when the password does, so a reset link works once.</summary>
+    /// <summary>Changes when the password does, so a reset link works once and a sign-up link only for its own password.</summary>
     private static string Stamp(DirectoryUser user) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(user.PasswordHash ?? "")))[..16];
-
-    /// <summary>A link's account and the stamp of the password it was mailed for.</summary>
-    private static (Guid Id, string Stamp) Unprotect(ITimeLimitedDataProtector protector, string token, string message)
-    {
-        try
-        {
-            string[] parts = protector.Unprotect(token ?? "").Split(':');
-            return parts.Length == 2 ? (Guid.ParseExact(parts[0], "N"), parts[1]) : throw new FormatException();
-        }
-        catch (Exception ex) when (ex is CryptographicException or FormatException)
-        {
-            throw new UserFriendlyException(message);
-        }
-    }
 
     private async Task<SignUpSettings> LoadAsync(GuardDbContext db, CancellationToken ct) =>
         await db.SignUpSettings.FirstOrDefaultAsync(s => s.Id == SignUpSettings.SiteId, ct) ?? db.SignUpSettings.Add(Initial(options.Value.SignUp)).Entity;

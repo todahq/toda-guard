@@ -6,6 +6,25 @@ change the API.
 
 ## [Unreleased]
 
+### Security
+
+- Setting up an authenticator app with a sign-in ticket is refused when the ticket's second step is a code the site
+  sends (email or a channel). Before, a password alone could put in an app of one's own there and pass the step without
+  the code.
+- A password reset ends what the old password signed in: browser sessions, the phone app's and scripts' sign-ins, and
+  personal access tokens (apps a person allowed stay, as when they sign out everywhere). It is in the security log
+  as `auth.password.reset`.
+- A sign-up's confirmation link works only for the password that sign-up set: signing up again for the same address
+  before confirming makes the links mailed before stop working.
+- Sign-in, step-up and second-step limits take a try before the password or code is checked, and sending codes takes
+  from its limits before a code is made, so requests sent at once can't go past a limit. A wrong password for a merged
+  account counts toward the limit as any other.
+- A security event keeps at most 256 characters of the username it was given.
+- A recovery code, an emailed code, an authenticator's step and a sign-in ticket each pass once, however many requests
+  use them together.
+- The default messenger writes each header on one line: a name, address or subject with a line break no longer starts
+  a header of its own.
+
 ### Changed
 
 - Adding, removing or choosing an account's addresses (`POST /api/guard/accounts/{id}/emails`,
@@ -18,20 +37,8 @@ change the API.
   administrator, whatever the actor's role says (the seeded Directory helpdesk's included).
 - Allowing an app at `/connect/authorize` takes the browser's session: any bearer token is refused, the phone's and
   scripts' from the token endpoint too.
-- A sign-up's confirmation link confirms that sign-up only: another sign-up for the same address makes earlier links
-  stop working. Links mailed before this version don't work; sign up again for a new one.
 - Display names with a line break or another control character are refused at sign-up, and when an admin creates an
   account or a service account.
-
-### Fixed
-
-- A sign-in ticket sets up an authenticator app only when the person has no way through the second step; when the site
-  sends them codes, the step asks for one.
-- A password reset ends the account's sessions everywhere: browsers', the phone's and scripts'.
-- Sign-in, step-up and second-step tries are taken before they're checked, so tries sent at once can't exceed the limits;
-  a recovery code, an emailed code and an authenticator's step each pass once, however many requests use them together.
-- The default messenger writes each header on one line: a name, address or subject with a line break no longer starts
-  a header of its own.
 
 ## [0.1.0-preview.1] - 2026-10-29
 

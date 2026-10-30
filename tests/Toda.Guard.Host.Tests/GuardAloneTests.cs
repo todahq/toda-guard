@@ -357,6 +357,196 @@ public sealed partial class GuardAloneTests : IAsyncLifetime
         Assert.Equal("token.created,token.revoked", await audit.ExecuteScalarAsync());
     }
 
+    [Fact]
+    public async Task A_ticket_whose_step_is_a_sent_code_cant_set_up_an_app_in_its_place()
+    {
+        // Erin's group requires a second factor and the site may mail codes; she has no app.
+        (HttpClient admin, string csrf) = await EmailCodesRequiredForAsync("erin", "Erin-Pass-12345");
+
+        // Her step is the mailed code: the password's ticket can't put an app of its own there, nor pass without a code.
+        (string ticket, bool enrol, string[] methods) = await ChallengeAsync("erin", "Erin-Pass-12345");
+        Assert.False(enrol);
+        Assert.Equal(["email"], methods);
+        HttpClient visitor = Client();
+        await AssertErrorAsync(await visitor.PostAsJsonAsync("/api/guard/second-factor/enrol/app", new { ticket }), HttpStatusCode.Unauthorized, "ticket_expired");
+        await AssertErrorAsync(await visitor.PostAsJsonAsync("/api/guard/second-factor/enrol/app/confirm", new { ticket, code = "000000" }), HttpStatusCode.Unauthorized, "ticket_expired");
+        Assert.False((await visitor.PostAsJsonAsync("/api/guard/session/second-factor", new { ticket, method = (string?)null, code = (string?)null })).IsSuccessStatusCode);
+
+        // With no code the site can send, the step is to set one up: the same ticket route sets the app up and passes.
+        Assert.True((await SendAsync(admin, csrf, HttpMethod.Put, "/api/guard/security/second-factor", new { methods = Array.Empty<string>() })).IsSuccessStatusCode);
+        (ticket, enrol, methods) = await ChallengeAsync("erin", "Erin-Pass-12345");
+        Assert.True(enrol);
+        Assert.Empty(methods);
+        HttpResponseMessage started = await visitor.PostAsJsonAsync("/api/guard/second-factor/enrol/app", new { ticket });
+        Assert.Equal(HttpStatusCode.OK, started.StatusCode);
+        using JsonDocument app = JsonDocument.Parse(await started.Content.ReadAsStringAsync());
+        string code = Services.TwoFactor.Totp.Code(Services.TwoFactor.Totp.FromBase32(app.RootElement.GetProperty("secret").GetString()!),
+            Services.TwoFactor.Totp.StepAt(DateTimeOffset.UtcNow));
+        Assert.Equal(HttpStatusCode.OK, (await visitor.PostAsJsonAsync("/api/guard/second-factor/enrol/app/confirm", new { ticket, code })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await visitor.PostAsJsonAsync("/api/guard/session/second-factor", new { ticket, method = (string?)null, code = (string?)null })).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_sign_in_sends_three_codes_and_takes_five_wrong_ones()
+    {
+        await EmailCodesRequiredForAsync("ivy", "Ivy-Pass-12345");
+        (string ticket, _, _) = await ChallengeAsync("ivy", "Ivy-Pass-12345");
+        HttpClient visitor = Client();
+        for (int i = 0; i < 3; i++)
+        {
+            Assert.Equal(HttpStatusCode.OK, (await visitor.PostAsJsonAsync("/api/guard/second-factor/send", new { ticket, method = "email" })).StatusCode);
+        }
+
+        await AssertErrorAsync(await visitor.PostAsJsonAsync("/api/guard/second-factor/send", new { ticket, method = "email" }), HttpStatusCode.TooManyRequests, "too_many_attempts");
+
+        for (int i = 0; i < 5; i++)
+        {
+            await AssertErrorAsync(await visitor.PostAsJsonAsync("/api/guard/session/second-factor", new { ticket, method = "email", code = "000000" }),
+                HttpStatusCode.BadRequest, "second_factor_failed");
+        }
+
+        await AssertErrorAsync(await visitor.PostAsJsonAsync("/api/guard/session/second-factor", new { ticket, method = "email", code = "000000" }), HttpStatusCode.Unauthorized, "ticket_expired");
+    }
+
+    [Fact]
+    public async Task A_password_reset_ends_the_sessions_and_tokens_the_old_password_made()
+    {
+        HttpClient admin = Client();
+        string csrf = await SignInAsync(admin, "admin", AdminPassword);
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(admin, csrf, HttpMethod.Post, "/api/guard/accounts",
+            new { username = "fern", displayName = "Fern", email = "fern@example.test", password = "Fern-Pass-12345" })).StatusCode);
+
+        // Fern is signed in in a browser and has an access token.
+        HttpClient browser = Client();
+        string fernCsrf = await SignInAsync(browser, "fern", "Fern-Pass-12345");
+        HttpResponseMessage made = await SendAsync(browser, fernCsrf, HttpMethod.Post, "/api/guard/me/tokens", new { name = "cli", access = "write", projectIds = (Guid[]?)null, days = 7 });
+        Assert.Equal(HttpStatusCode.OK, made.StatusCode);
+        string secret;
+        using (JsonDocument token = JsonDocument.Parse(await made.Content.ReadAsStringAsync()))
+        {
+            secret = token.RootElement.GetProperty("secret").GetString()!;
+        }
+
+        // She resets her password from the mailed link.
+        Assert.Equal(HttpStatusCode.NoContent, (await Client().PostAsJsonAsync("/api/guard/password/forgot", new { email = "fern@example.test" })).StatusCode);
+        string link = await MailTokenAsync("fern@example.test");
+        Assert.True((await Client().PostAsJsonAsync("/api/guard/password/reset", new { token = link, password = "Fern-New-Pass-123" })).IsSuccessStatusCode);
+
+        // What the old password signed in no longer works; the new password does.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await browser.GetAsync("/api/guard/me")).StatusCode);
+        using HttpRequestMessage me = new(HttpMethod.Get, "/api/guard/me");
+        me.Headers.Authorization = new("Bearer", secret);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Client().SendAsync(me)).StatusCode);
+        await SignInAsync(Client(), "fern", "Fern-New-Pass-123");
+    }
+
+    [Fact]
+    public async Task Signing_up_again_replaces_the_earlier_link()
+    {
+        HttpClient admin = Client();
+        string csrf = await SignInAsync(admin, "admin", AdminPassword);
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(admin, csrf, HttpMethod.Put, "/api/guard/signup/settings",
+            new { enabled = true, directoryId = "00000000-0000-0000-0000-00000000d001", emailDomains = Array.Empty<string>() })).StatusCode);
+
+        // Two sign-ups for the same address before it's confirmed: only the latest link confirms, with its own password.
+        Assert.Equal(HttpStatusCode.NoContent, (await Client().PostAsJsonAsync("/api/guard/signup", new { email = "gail@example.test", displayName = "Gail", password = "Gail-First-12345" })).StatusCode);
+        string first = await MailTokenAsync("gail@example.test");
+        Assert.Equal(HttpStatusCode.NoContent, (await Client().PostAsJsonAsync("/api/guard/signup", new { email = "gail@example.test", displayName = "Gail", password = "Gail-Second-1234" })).StatusCode);
+        string second = await MailTokenAsync("gail@example.test");
+        Assert.NotEqual(first, second);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await Client().PostAsJsonAsync("/api/guard/signup/verify", new { token = first })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Client().PostAsJsonAsync("/api/guard/signup/verify", new { token = second })).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Client().PostAsJsonAsync("/api/guard/session", new { username = "gail@example.test", password = "Gail-First-12345" })).StatusCode);
+        await SignInAsync(Client(), "gail@example.test", "Gail-Second-1234");
+    }
+
+    [Fact]
+    public async Task Wrong_passwords_for_a_merged_account_count_toward_the_limit()
+    {
+        Environment.SetEnvironmentVariable("Guard__Features__Merges", "true");
+        try
+        {
+            HttpClient admin = Client();
+            string csrf = await SignInAsync(admin, "admin", AdminPassword);
+            Guid old = await IdAsync(await SendAsync(admin, csrf, HttpMethod.Post, "/api/guard/accounts",
+                new { username = "hal-old", displayName = "Hal", email = (string?)null, password = "Hal-Old-Pass-123" }));
+            Guid kept = await IdAsync(await SendAsync(admin, csrf, HttpMethod.Post, "/api/guard/accounts",
+                new { username = "hal", displayName = "Hal", email = (string?)null, password = "Hal-New-Pass-123" }));
+            Assert.Equal(HttpStatusCode.OK, (await SendAsync(admin, csrf, HttpMethod.Post, $"/api/guard/accounts/{old}/merge", new { survivorId = kept, confirm = "hal-old" })).StatusCode);
+
+            // The merged account's own password still points to the survivor; wrong ones are limited like any sign-in's.
+            for (int i = 0; i < 5; i++)
+            {
+                await AssertErrorAsync(await Client().PostAsJsonAsync("/api/guard/session", new { username = "hal-old", password = $"wrong-{i}-password" }),
+                    HttpStatusCode.Unauthorized, "invalid_credentials");
+            }
+
+            Assert.Equal(HttpStatusCode.TooManyRequests, (await Client().PostAsJsonAsync("/api/guard/session", new { username = "hal-old", password = "Hal-Old-Pass-123" })).StatusCode);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Guard__Features__Merges", null);
+        }
+    }
+
+    /// <summary>
+    /// A person ({username}@example.test) in a group that requires a second factor, on a site that mails codes: the
+    /// admin's client and its anti-forgery value.
+    /// </summary>
+    private async Task<(HttpClient Admin, string Csrf)> EmailCodesRequiredForAsync(string username, string password)
+    {
+        HttpClient admin = Client();
+        string csrf = await SignInAsync(admin, "admin", AdminPassword);
+        Guid person = await IdAsync(await SendAsync(admin, csrf, HttpMethod.Post, "/api/guard/accounts",
+            new { username, displayName = username, email = $"{username}@example.test", password }));
+        Guid group = await IdAsync(await SendAsync(admin, csrf, HttpMethod.Post, "/api/guard/groups", new { name = $"needs-two-factor-{username}", description = (string?)null, directoryId = (Guid?)null }));
+        Assert.True((await SendAsync(admin, csrf, HttpMethod.Post, $"/api/guard/groups/{group}/members", new { accountId = person, groupId = (Guid?)null })).IsSuccessStatusCode);
+        Assert.True((await SendAsync(admin, csrf, HttpMethod.Put, $"/api/guard/groups/{group}/two-factor", new { mode = "required" })).IsSuccessStatusCode);
+        Assert.True((await SendAsync(admin, csrf, HttpMethod.Put, "/api/guard/security/second-factor", new { methods = new[] { "email" } })).IsSuccessStatusCode);
+        return (admin, csrf);
+    }
+
+    /// <summary>The token in the newest mail to the address in the pickup folder.</summary>
+    private async Task<string> MailTokenAsync(string address)
+    {
+        foreach (string file in Directory.GetFiles(_mail, "*.eml").OrderDescending(StringComparer.Ordinal))
+        {
+            string mail = await File.ReadAllTextAsync(file);
+            if (mail.Contains($"<{address}>", StringComparison.Ordinal))
+            {
+                return Uri.UnescapeDataString(Token().Match(mail).Groups[1].Value);
+            }
+        }
+
+        throw new InvalidOperationException($"No mail to {address}.");
+    }
+
+    /// <summary>Signs in with a password a second step is asked for: the ticket, whether it's to set one up, and the methods.</summary>
+    private async Task<(string Ticket, bool Enrol, string[] Methods)> ChallengeAsync(string username, string password)
+    {
+        HttpResponseMessage asked = await Client().PostAsJsonAsync("/api/guard/session", new { username, password });
+        Assert.Equal(HttpStatusCode.Unauthorized, asked.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await asked.Content.ReadAsStringAsync());
+        JsonElement step = body.RootElement.GetProperty("secondFactor");
+        return (step.GetProperty("ticket").GetString()!, step.GetProperty("enrol").GetBoolean(),
+            step.GetProperty("methods").EnumerateArray().Select(m => m.GetString()!).ToArray());
+    }
+
+    private static async Task<HttpResponseMessage> SendAsync(HttpClient client, string csrf, HttpMethod method, string path, object body)
+    {
+        using HttpRequestMessage request = new(method, path) { Content = JsonContent.Create(body) };
+        request.Headers.Add(CsrfHeader, csrf);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<Guid> IdAsync(HttpResponseMessage response)
+    {
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return body.RootElement.GetProperty("id").GetGuid();
+    }
+
     private static async Task AssertErrorAsync(HttpResponseMessage response, HttpStatusCode status, string code)
     {
         Assert.Equal(status, response.StatusCode);
