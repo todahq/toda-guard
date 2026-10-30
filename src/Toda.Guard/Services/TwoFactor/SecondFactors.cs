@@ -164,7 +164,15 @@ public sealed class SecondFactors(
 
             if (row.ProvedAt is null)
             {
-                if (await limits.CountAsync(WrongKey(account.Id), WrongCodesWindow, cancellationToken) >= MaxWrongCodes)
+                // The ticket's try and the person's are taken before the code is checked, so codes sent at once can't
+                // all be checked before the first wrong one counts; a right code gives the person's back.
+                if (await db.SignInTickets.Where(t => t.Id == row.Id && t.Attempts < SignInTicket.MaxAttempts)
+                        .ExecuteUpdateAsync(u => u.SetProperty(t => t.Attempts, t => t.Attempts + 1), cancellationToken) == 0)
+                {
+                    return (null, account.Id, account.Username, "ticket");
+                }
+
+                if (!await limits.TryTakeAsync(WrongKey(account.Id), MaxWrongCodes, WrongCodesWindow, cancellationToken))
                 {
                     return (null, account.Id, account.Username, "blocked");
                 }
@@ -172,11 +180,10 @@ public sealed class SecondFactors(
                 bool strong = await ModeAsync(db, account, cancellationToken) == TwoFactorModes.Strong;
                 if (!await CheckCodeAsync(db, account.Id, method, code, strong, now, cancellationToken))
                 {
-                    row.Attempts++;
-                    await db.SaveChangesAsync(cancellationToken);
-                    await limits.AddAsync(WrongKey(account.Id), cancellationToken);
                     return (null, account.Id, account.Username, "code");
                 }
+
+                await limits.ResetAsync(WrongKey(account.Id), cancellationToken);
             }
 
             db.SignInTickets.Remove(row);
@@ -223,7 +230,8 @@ public sealed class SecondFactors(
                 return ("second_factor_required", account.Username);
             }
 
-            if (await limits.CountAsync(WrongKey(accountId), WrongCodesWindow, cancellationToken) >= MaxWrongCodes)
+            // Taken before the check, as at sign-in; a right code gives it back.
+            if (!await limits.TryTakeAsync(WrongKey(accountId), MaxWrongCodes, WrongCodesWindow, cancellationToken))
             {
                 return ("too_many_attempts", account.Username);
             }
@@ -231,10 +239,10 @@ public sealed class SecondFactors(
             bool strong = await ModeAsync(db, account, cancellationToken) == TwoFactorModes.Strong;
             if (await CheckCodeAsync(db, accountId, method, code, strong, DateTime.UtcNow, cancellationToken))
             {
+                await limits.ResetAsync(WrongKey(accountId), cancellationToken);
                 return (null, account.Username);
             }
 
-            await limits.AddAsync(WrongKey(accountId), cancellationToken);
             return ("second_factor_failed", account.Username);
         }, requiresNew: true, cancellationToken);
 
@@ -298,21 +306,33 @@ public sealed class SecondFactors(
     }
 
     /// <summary>
-    /// The account a ticket may set up a second factor for; null when it can't: used, expired, out of tries, or the person
-    /// has one already (the ticket would otherwise pass the step without it).
+    /// The account a ticket may set up a second factor for; null when it can't: used, expired, out of tries, or the step
+    /// has a method already (the ticket would otherwise pass the step without it). That is the challenge's own rule: only
+    /// a person with no factor and no code the site can send them sets one up, so a password alone can't put in an app
+    /// in place of the code their email or phone would get.
     /// </summary>
     public Task<Guid?> TicketAccountAsync(string ticket, CancellationToken cancellationToken)
     {
         string hash = Hash(ticket);
         DateTime now = DateTime.UtcNow;
-        return guardDb.RunAsync(async db =>
+        return guardDb.RunAsync<Guid?>(async db =>
         {
             var row = await db.SignInTickets.AsNoTracking().Where(t => t.TicketHash == hash).Select(t => new { t.AccountId, t.ExpiresAt, t.Attempts, t.ProvedAt })
                 .FirstOrDefaultAsync(cancellationToken);
-            return row is not null && row.ExpiresAt > now && row.Attempts < SignInTicket.MaxAttempts && row.ProvedAt is null
-                && !await db.SecondFactors.AnyAsync(f => f.AccountId == row.AccountId && f.ConfirmedAt != null, cancellationToken)
-                ? row.AccountId
-                : (Guid?)null;
+            if (row is null || row.ExpiresAt <= now || row.Attempts >= SignInTicket.MaxAttempts || row.ProvedAt is not null
+                || await db.SecondFactors.AnyAsync(f => f.AccountId == row.AccountId && f.ConfirmedAt != null, cancellationToken))
+            {
+                return null;
+            }
+
+            // Sent codes are no SecondFactor rows: where one reaches the person the challenge asked for it, not for enrolment.
+            if (await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == row.AccountId, cancellationToken) is not { } account)
+            {
+                return null;
+            }
+
+            bool strong = await ModeAsync(db, account, cancellationToken) == TwoFactorModes.Strong;
+            return strong || (await SendersAsync(db, account, cancellationToken)).Count == 0 ? row.AccountId : null;
         }, cancellationToken: cancellationToken);
     }
 
@@ -413,8 +433,9 @@ public sealed class SecondFactors(
                 return (null, "unreachable", account.Username, null);
             }
 
-            if (await limits.CountAsync(SendKey(accountId), WrongCodesWindow, cancellationToken) >= MaxSends
-                || (ticketKey is not null && await limits.CountAsync($"second-factor-send|{ticketKey}", SignInTicket.Lifetime, cancellationToken) >= MaxSendsPerTicket))
+            // Each send is taken from both limits before a code is made, so sends asked for at once can't all go out.
+            if (!await limits.TryTakeAsync(SendKey(accountId), MaxSends, WrongCodesWindow, cancellationToken)
+                || (ticketKey is not null && !await limits.TryTakeAsync($"second-factor-send|{ticketKey}", MaxSendsPerTicket, SignInTicket.Lifetime, cancellationToken)))
             {
                 return (null, "too_many_attempts", account.Username, null);
             }
@@ -429,12 +450,6 @@ public sealed class SecondFactors(
         if (sender is null || code is null)
         {
             return new SendCodeResult(null, error);
-        }
-
-        await limits.AddAsync(SendKey(accountId), cancellationToken);
-        if (ticketKey is not null)
-        {
-            await limits.AddAsync($"second-factor-send|{ticketKey}", cancellationToken);
         }
 
         // A secret (ADR 0082): delivered as rendered, now and once, kept nowhere in the clear, never tried again.

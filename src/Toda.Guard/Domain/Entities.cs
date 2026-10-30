@@ -326,10 +326,13 @@ public class SecurityEvent : Entity<Guid>
     {
     }
 
+    /// <summary>The longest username kept: a sign-in's is whatever was typed, and a guess mustn't fill the log.</summary>
+    public const int MaxUsernameLength = 256;
+
     public SecurityEvent(Guid id, string type, string? username, Guid? accountId, string? detail, string? ip) : base(id)
     {
         Type = type;
-        Username = username;
+        Username = username is { Length: > MaxUsernameLength } ? username[..MaxUsernameLength] : username;
         AccountId = accountId;
         Detail = detail;
         Ip = ip;

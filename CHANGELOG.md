@@ -6,6 +6,21 @@ change the API.
 
 ## [Unreleased]
 
+### Security
+
+- Setting up an authenticator app with a sign-in ticket is refused when the ticket's second step is a code the site
+  sends (email or a channel). Before, a password alone could put in an app of one's own there and pass the step without
+  the code.
+- A password reset ends what the old password signed in: browser sessions, the phone app's and scripts' sign-ins, and
+  personal access tokens (apps a person allowed stay, as when they sign out everywhere). It is in the security log
+  as `auth.password.reset`.
+- A sign-up's confirmation link works only for the password that sign-up set: signing up again for the same address
+  before confirming makes the links mailed before stop working.
+- Sign-in, step-up and second-step limits take a try before the password or code is checked, and sending codes takes
+  from its limits before a code is made, so requests sent at once can't go past a limit. A wrong password for a merged
+  account counts toward the limit as any other.
+- A security event keeps at most 256 characters of the username it was given.
+
 ## [0.1.0-preview.1] - 2026-10-29
 
 Extracted from Toda at 19563f7d, with its history for these paths. The first version as packages on nuget.org:

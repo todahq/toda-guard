@@ -45,6 +45,9 @@ public static class SecurityAuditTypes
     /// <summary>A person signed out everywhere else, or an admin locked the account: its sessions ended (ADR 0075).</summary>
     public const string SessionsEnded = "auth.sessions.ended";
 
+    /// <summary>A person set a new password from a reset link: their sessions and tokens ended with the old one.</summary>
+    public const string PasswordReset = "auth.password.reset";
+
     /// <summary>OAuth for agents (M7): an MCP client registered itself, an admin made or removed an app.</summary>
     public const string OAuthAppRegistered = "oauth.app.registered";
     public const string OAuthAppCreated = "oauth.app.created";
