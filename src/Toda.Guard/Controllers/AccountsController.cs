@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Toda.Guard.Domain;
 using Toda.Guard.Services;
@@ -113,7 +114,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
             DirectoryUser user = new(Guid.NewGuid(), directoryId, $"internal:{normalized}", input.Username)
             {
-                DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? input.Username : input.DisplayName.Trim(),
+                DisplayName = string.IsNullOrWhiteSpace(input.DisplayName) ? input.Username : DisplayNames.Check(input.DisplayName.Trim()),
                 Email = input.Email?.Trim(),
             };
             user.PasswordHash = AuthService.HashPassword(user, input.Password);
@@ -167,7 +168,9 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
             throw new UserFriendlyException("You can't reset your own second factors. Remove them from your profile, or ask another admin.");
         }
 
-        Ensure(await AbilityAsync(cancellationToken), "reset-second-factor", await AccountAsync(id, cancellationToken));
+        Casl.Ability ability = await AbilityAsync(cancellationToken);
+        Ensure(ability, "reset-second-factor", await AccountAsync(id, cancellationToken));
+        await EnsureNotAnAdminAsync(ability, id, "reset the second factors of", cancellationToken);
         await secondFactors.ResetAsync(id, cancellationToken);
         return NoContent();
     }
@@ -180,6 +183,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
         }
 
         Casl.Ability ability = await AbilityAsync(cancellationToken);
+        await EnsureNotAnAdminAsync(ability, id, locked ? "lock" : "unlock", cancellationToken);
         (AccountDto dto, List<object> events) = await guardDb.RunAsync(async db =>
         {
             Account account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == id, cancellationToken)
@@ -206,6 +210,18 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
         await PublishAsync(events);
         return dto;
+    }
+
+    /// <summary>
+    /// A right short of an admin's (a helpdesk's) doesn't reach an account with an admin's rights: locking one ends its
+    /// every session, and unlocking one an admin locked would undo them.
+    /// </summary>
+    private async Task EnsureNotAnAdminAsync(Casl.Ability ability, Guid id, string what, CancellationToken cancellationToken)
+    {
+        if (!ability.Can("manage", "all") && await HttpContext.RequestServices.GetRequiredService<AbilityFactory>().HoldsAdminRightsAsync(id, cancellationToken))
+        {
+            throw new UserFriendlyException($"Only an administrator can {what} an administrator.", GuardErrorCodes.Forbidden);
+        }
     }
 
     // ---- Addresses (ADR 0044): an admin's are verified at once ----

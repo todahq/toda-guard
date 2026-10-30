@@ -9,7 +9,9 @@ namespace Toda.Guard.Services;
 
 /// <summary>
 /// Brute-force limit per username and per IP: 5 failures in 15 minutes blocks for 15 minutes (20 per IP). Counted for
-/// the whole site (<see cref="IGuardRateLimits"/>), so several servers allow no more than one.
+/// the whole site (<see cref="IGuardRateLimits"/>), so several servers allow no more than one. A username's try is
+/// taken before its password is checked, so tries sent at once can't all pass a check made before any is counted; a
+/// right password gives them back.
 /// </summary>
 public class LoginRateLimiter(IGuardRateLimits limits) : ISingletonDependency
 {
@@ -20,9 +22,14 @@ public class LoginRateLimiter(IGuardRateLimits limits) : ISingletonDependency
         await limits.CountAsync($"sign-in|u:{username}", Window, cancellationToken) >= MaxFailures
         || (ip is not null && await limits.CountAsync($"sign-in|ip:{ip}", Window, cancellationToken) >= MaxFailures * 4);
 
-    public async Task RecordFailureAsync(string username, string? ip, CancellationToken cancellationToken = default)
+    /// <summary>Takes a try for the username; false when it's blocked, or the IP is.</summary>
+    public async Task<bool> TryAttemptAsync(string username, string? ip, CancellationToken cancellationToken = default) =>
+        !(ip is not null && await limits.CountAsync($"sign-in|ip:{ip}", Window, cancellationToken) >= MaxFailures * 4)
+        && await limits.TryTakeAsync($"sign-in|u:{username}", MaxFailures, Window, cancellationToken);
+
+    /// <summary>A wrong password, for the IP's count: the username's was counted when the try was taken.</summary>
+    public async Task RecordFailureAsync(string? ip, CancellationToken cancellationToken = default)
     {
-        await limits.AddAsync($"sign-in|u:{username}", cancellationToken);
         if (ip is not null)
         {
             await limits.AddAsync($"sign-in|ip:{ip}", cancellationToken);
@@ -51,7 +58,7 @@ public class AuthService(
     public async Task<LoginResult> LoginAsync(string username, string password, string? ip, CancellationToken cancellationToken = default)
     {
         string normalized = GuardConstants.Normalize(username);
-        if (await limiter.IsBlockedAsync(normalized, ip, cancellationToken))
+        if (!await limiter.TryAttemptAsync(normalized, ip, cancellationToken))
         {
             await AuditAsync("auth.login.blocked", normalized, null, "Too many failed attempts", ip, cancellationToken);
             return new LoginResult(false, null, "too_many_attempts");
@@ -97,7 +104,7 @@ public class AuthService(
             // Account-state failures don't count toward the brute-force limit; wrong passwords do.
             if (reason is "wrong_password" or "user_not_found" or "invalid_credentials")
             {
-                await limiter.RecordFailureAsync(normalized, ip, cancellationToken);
+                await limiter.RecordFailureAsync(ip, cancellationToken);
             }
 
             await AuditAsync("auth.login.failed", normalized, account?.Id, reason, ip, cancellationToken);
@@ -140,7 +147,7 @@ public class AuthService(
                 return (account, "account_inactive");
             }
 
-            return (account, await limiter.IsBlockedAsync(account.NormalizedUsername, ip, cancellationToken)
+            return (account, !await limiter.TryAttemptAsync(account.NormalizedUsername, ip, cancellationToken)
                 ? "too_many_attempts"
                 : await CheckPasswordAsync(db, account, password, cancellationToken));
         }, cancellationToken: cancellationToken);
@@ -155,7 +162,7 @@ public class AuthService(
 
         if (username is not null && refused is "wrong_password" or "invalid_credentials")
         {
-            await limiter.RecordFailureAsync(username, ip, cancellationToken);
+            await limiter.RecordFailureAsync(ip, cancellationToken);
         }
 
         bool end = refused is "account_inactive" or "directory_inactive" or "directory_signin_disabled"

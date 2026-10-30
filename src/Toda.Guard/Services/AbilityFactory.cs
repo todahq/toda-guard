@@ -61,6 +61,43 @@ public class AbilityFactory(GuardDb guardDb, MembershipGraph graph, ILogger<Abil
         return _cache[accountId] = Limit(own, accountId, acting, limits);
     }
 
+    /// <summary>
+    /// Whether a role granted to the account, itself or through its groups, can do everything: an administrator's
+    /// rights, whatever the account's status (a locked admin's too). A rule on <c>all</c> has no conditions or fields.
+    /// </summary>
+    public Task<bool> HoldsAdminRightsAsync(Guid accountId, CancellationToken cancellationToken = default) => guardDb.RunAsync(async db =>
+    {
+        Account? account = await db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == accountId, cancellationToken);
+        if (account is null)
+        {
+            return false;
+        }
+
+        // Its groups as they'd be were it active: a locked account is in none until it's unlocked. The copy isn't tracked.
+        account.Status = AccountStatus.Active;
+        List<Guid> groupIds = (await graph.GetEffectiveGroupsAsync(db, account, cancellationToken)).Select(g => g.Group.Id).ToList();
+        DateTime now = DateTime.UtcNow;
+        List<string> rules = await db.RoleGrants.AsNoTracking()
+            .Where(g => (g.PrincipalType == PrincipalType.Account && g.PrincipalId == accountId) || (g.PrincipalType == PrincipalType.Group && groupIds.Contains(g.PrincipalId)))
+            .Where(g => g.ValidUntil == null || g.ValidUntil > now)
+            .Join(db.RoleRules, g => g.RoleId, r => r.RoleId, (g, r) => r.Json)
+            .ToListAsync(cancellationToken);
+        return rules.Any(ManagesAll);
+    }, cancellationToken: cancellationToken);
+
+    private static bool ManagesAll(string json)
+    {
+        JsonNode? rule = JsonNode.Parse(json);
+        static bool Has(JsonNode? node, string value) => node switch
+        {
+            JsonArray array => array.Any(n => n?.GetValue<string>() == value),
+            JsonValue one => one.GetValue<string>() == value,
+            _ => false,
+        };
+
+        return rule?["inverted"]?.GetValue<bool>() != true && Has(rule?["action"], "manage") && Has(rule?["subject"], "all");
+    }
+
     /// <summary>The request's limits, on the request's subject only.</summary>
     public static Ability Limit(Ability own, Guid accountId, ActingContext acting, IEnumerable<IAbilityLimit> limits) =>
         acting.SubjectId == accountId ? limits.Aggregate(own, (ability, limit) => limit.Apply(ability, acting)) : own;

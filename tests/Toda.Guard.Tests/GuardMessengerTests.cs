@@ -104,6 +104,34 @@ public class GuardMessengerTests
         }
     }
 
+    [Fact]
+    public async Task A_name_or_address_with_line_breaks_starts_no_header_of_its_own()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "guard-pickup-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            PickupGuardMessenger messenger = new(Options.Create(new GuardOptions { Messenger = { PickupFolder = folder } }), new NoAccounts(),
+                NullLogger<PickupGuardMessenger>.Instance);
+            await messenger.SendAsync(new GuardMessage(GuardMessageKinds.PasswordReset, null, "dana@toda.example\r\nCc: eve@attacker.example",
+                "Dana\r\nBcc: eve@attacker.example\u2028X-Injected: yes",
+                new Dictionary<string, object?> { ["username"] = "dana", ["link"] = "https://toda.example/reset#t", ["minutes"] = 60 }, "en", "password-reset"),
+                CancellationToken.None);
+
+            string mail = await File.ReadAllTextAsync(Assert.Single(Directory.GetFiles(folder)));
+            string[] headers = mail[..mail.IndexOf("\r\n\r\n", StringComparison.Ordinal)].Split("\r\n");
+            Assert.Equal(["To", "Subject", "Content-Type", "X-Guard-Kind"], headers.Select(h => h[..h.IndexOf(':', StringComparison.Ordinal)]));
+            Assert.DoesNotContain(mail.Split("\r\n"), line => line.StartsWith("Bcc:", StringComparison.Ordinal) || line.StartsWith("Cc:", StringComparison.Ordinal));
+            Assert.DoesNotContain('\u2028', mail);
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     private sealed class NoAccounts : IAccountLookup
     {
         public Task<AccountInfo?> GetAsync(Guid accountId, CancellationToken cancellationToken = default) => Task.FromResult<AccountInfo?>(null);

@@ -100,7 +100,7 @@ public static class SelfServiceMail
 /// </summary>
 [ExposeServices(typeof(SelfService), typeof(ICustomerAccounts))]
 public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProtectionProvider protection, IGuardMessenger messenger, IGuardSiteDefaults siteDefaults, IOptions<GuardOptions> options,
-    IGuardEventSink events, AccountMergeService merges, SecurityLog audit, IOptions<GuardNames> names) : ITransientDependency, ICustomerAccounts
+    IGuardEventSink events, AccountMergeService merges, SecurityLog audit, IOptions<GuardNames> names, AccountSessions sessions) : ITransientDependency, ICustomerAccounts
 {
     public static readonly TimeSpan VerifyFor = TimeSpan.FromHours(72);
     public static readonly TimeSpan ResetFor = TimeSpan.FromHours(1);
@@ -170,7 +170,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         }
 
         Password(input.Password);
-        string name = string.IsNullOrWhiteSpace(input.DisplayName) ? email : input.DisplayName.Trim();
+        string name = string.IsNullOrWhiteSpace(input.DisplayName) ? email : DisplayNames.Check(input.DisplayName.Trim());
         if (name.Length > 200)
         {
             throw new UserFriendlyException("A name is at most 200 characters.");
@@ -220,7 +220,8 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
             return record;
         }, requiresNew: true, ct, isTransactional: true);
 
-        string token = Verifier.Protect(user.Id.ToString("N"), VerifyFor);
+        // The link confirms this sign-up only: another for the same address sets another password, and this one stops working.
+        string token = Verifier.Protect($"{user.Id:N}:{Stamp(user)}", VerifyFor);
         // The link in the language the person signed up in.
         string link = GuardPageOptions.Link(Site, options.Value.Pages.SignUpVerify, siteDefaults.RequestLanguage);
         await SendAsync(SelfServiceMail.Verify, user, new Dictionary<string, object?> { ["link"] = $"{link}#token={token}", ["hours"] = (int)VerifyFor.TotalHours }, ct);
@@ -229,7 +230,8 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
     /// <summary>Confirms a sign-up's email: the account becomes active, and joins organizations by its domain. Returns its username.</summary>
     public async Task<(string Username, List<object> Events)> VerifyAsync(string token, CancellationToken ct)
     {
-        Guid id = Unprotect(Verifier, token, "This link doesn't work: it's wrong, or more than three days old. Sign up again for a new one.");
+        const string Broken = "This link doesn't work: it's wrong, more than three days old, or there was a newer sign-up for this email. Use the newest link, or sign up again.";
+        (Guid id, string stamp) = Unprotect(Verifier, token, Broken);
         (string Username, List<object> Events) verified = await guardDb.RunAsync(async db =>
         {
             DirectoryUser user = await db.DirectoryUsers.FirstOrDefaultAsync(u => u.Id == id, ct)
@@ -237,6 +239,11 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
             if (user.PendingSince is null)
             {
                 return (user.Username, new List<object>()); // confirmed already: following the link again does nothing
+            }
+
+            if (Stamp(user) != stamp)
+            {
+                throw new UserFriendlyException(Broken);
             }
 
             user.PendingSince = null;
@@ -362,7 +369,7 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
         }
 
         string[] parts = payload.Split(':');
-        return await guardDb.RunAsync(async db =>
+        (string username, Guid? accountId) = await guardDb.RunAsync(async db =>
         {
             DirectoryUser? user = parts.Length == 2 && Guid.TryParse(parts[0], out Guid id) ? await db.DirectoryUsers.FirstOrDefaultAsync(u => u.Id == id, ct) : null;
             if (user is null || Stamp(user) != parts[1] || !user.IsActive)
@@ -372,8 +379,17 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
 
             user.PasswordHash = AuthService.HashPassword(user, password);
             await db.SaveChangesAsync(ct);
-            return user.Username;
+            Guid? accountId = await db.Accounts.Where(a => a.NormalizedUsername == user.NormalizedUsername).Select(a => (Guid?)a.Id).FirstOrDefaultAsync(ct);
+            return (user.Username, accountId);
         }, requiresNew: true, ct);
+
+        // Whoever knew the old password is signed out: a reset is how a person takes their account back.
+        if (accountId is { } id)
+        {
+            await sessions.EndEverywhereAsync(id, keepSession: null, keepAuthorization: null, "password-reset", ct);
+        }
+
+        return username;
     }
 
     private async Task SendAsync(string template, DirectoryUser user, Dictionary<string, object?> model, CancellationToken ct, string? to = null) =>
@@ -391,11 +407,13 @@ public class SelfService(GuardDb guardDb, AccountProjector projector, IDataProte
     /// <summary>Changes when the password does, so a reset link works once.</summary>
     private static string Stamp(DirectoryUser user) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(user.PasswordHash ?? "")))[..16];
 
-    private static Guid Unprotect(ITimeLimitedDataProtector protector, string token, string message)
+    /// <summary>A link's account and the stamp of the password it was mailed for.</summary>
+    private static (Guid Id, string Stamp) Unprotect(ITimeLimitedDataProtector protector, string token, string message)
     {
         try
         {
-            return Guid.ParseExact(protector.Unprotect(token ?? ""), "N");
+            string[] parts = protector.Unprotect(token ?? "").Split(':');
+            return parts.Length == 2 ? (Guid.ParseExact(parts[0], "N"), parts[1]) : throw new FormatException();
         }
         catch (Exception ex) when (ex is CryptographicException or FormatException)
         {

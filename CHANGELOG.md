@@ -14,11 +14,24 @@ change the API.
   roles relied on `update`.
 - Merging an account with a right short of an admin's is refused when the merger would be the survivor, or the account
   merged away holds grants or memberships added in Guard.
+- Locking, unlocking or resetting the second factors of an account with an administrator's rights needs an
+  administrator, whatever the actor's role says (the seeded Directory helpdesk's included).
+- Allowing an app at `/connect/authorize` takes the browser's session: any bearer token is refused, the phone's and
+  scripts' from the token endpoint too.
+- A sign-up's confirmation link confirms that sign-up only: another sign-up for the same address makes earlier links
+  stop working. Links mailed before this version don't work; sign up again for a new one.
+- Display names with a line break or another control character are refused at sign-up, and when an admin creates an
+  account or a service account.
 
 ### Fixed
 
 - A sign-in ticket sets up an authenticator app only when the person has no way through the second step; when the site
   sends them codes, the step asks for one.
+- A password reset ends the account's sessions everywhere: browsers', the phone's and scripts'.
+- Sign-in, step-up and second-step tries are taken before they're checked, so tries sent at once can't exceed the limits;
+  a recovery code, an emailed code and an authenticator's step each pass once, however many requests use them together.
+- The default messenger writes each header on one line: a name, address or subject with a line break no longer starts
+  a header of its own.
 
 ## [0.1.0-preview.1] - 2026-10-29
 
