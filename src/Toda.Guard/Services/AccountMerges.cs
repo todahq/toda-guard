@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Casl;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Toda.Guard.Data;
@@ -210,12 +211,19 @@ public class AccountMergeService(GuardDb guardDb, IGuardExtensions extensions, I
     }, cancellationToken: ct);
 
     /// <summary>Merges, newest first: all of them, or those an account was in (as source or survivor).</summary>
-    public Task<List<AccountMergeDto>> ListAsync(Guid? accountId, int take, CancellationToken ct) => guardDb.RunAsync(async db =>
+    /// <summary>The newest merges, of an account or all; with <paramref name="within"/>, only those whose two accounts it may merge (in SQL).</summary>
+    public Task<List<AccountMergeDto>> ListAsync(Guid? accountId, int take, CancellationToken ct, Casl.Ability? within = null) => guardDb.RunAsync(async db =>
     {
         IQueryable<AccountMergeRecord> query = db.Merges.AsNoTracking();
         if (accountId is { } id)
         {
             query = query.Where(m => m.SourceId == id || m.SurvivorId == id);
+        }
+
+        if (within is not null)
+        {
+            IQueryable<Guid> mergeable = db.Accounts.AsNoTracking().AccessibleBy(within, "merge").Select(a => a.Id);
+            query = query.Where(m => mergeable.Contains(m.SourceId) && mergeable.Contains(m.SurvivorId));
         }
 
         return await DtosAsync(db, await query.OrderByDescending(m => m.StartedAt).Take(Math.Clamp(take, 1, 500)).ToListAsync(ct), ct);

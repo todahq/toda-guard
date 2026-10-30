@@ -24,6 +24,12 @@ change the API.
   use them together.
 - The default messenger writes each header on one line: a name, address or subject with a line break no longer starts
   a header of its own.
+- An access token is checked against its entry and its sign-in on every request: revoking it, revoking the app's
+  permission, signing out everywhere, a lock or a merge stops it at once, not when its 15 minutes run out.
+- With `Features:PersonalTokens` off, no personal access token signs in, those issued before included.
+- A merge right short of an admin's lists, reads and resumes only the merges of accounts it may merge; resuming takes a
+  step-up.
+- CI pins each action by commit SHA, and Dependabot keeps the pins current.
 
 ### Changed
 

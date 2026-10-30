@@ -153,6 +153,10 @@ public class TodaGuardModule : AbpModule
             {
                 options.UseLocalServer();
                 options.UseAspNetCore();
+                // Each request checks the token's own entry and its sign-in's: revoking either, signing out everywhere,
+                // a lock or a merge stops an access token at once, not when its 15 minutes run out.
+                options.EnableTokenEntryValidation();
+                options.EnableAuthorizationEntryValidation();
             });
 
         // A bearer token is either an access token from the token endpoint (OpenIddict) or a personal access token (M7). A

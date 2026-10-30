@@ -71,6 +71,8 @@ public sealed partial class SecurityTests : IAsyncLifetime
             Environment.SetEnvironmentVariable($"Guard__Features__{feature}", null);
         }
 
+        Environment.SetEnvironmentVariable("Guard__Features__PersonalTokens", null);
+
         NpgsqlConnection.ClearAllPools();
         await using NpgsqlConnection connection = new($"{Server};Database=postgres");
         await connection.OpenAsync();
@@ -245,6 +247,89 @@ public sealed partial class SecurityTests : IAsyncLifetime
     [Fact]
     public async Task Only_the_browsers_session_allows_an_app()
     {
+        string access = await PhoneAccessTokenAsync();
+        HttpResponseMessage registered = await Client().PostAsJsonAsync("/connect/register", new { client_name = "An app", redirect_uris = new[] { "https://app.example/cb" } });
+        Assert.Equal(HttpStatusCode.Created, registered.StatusCode);
+        string clientId = JsonDocument.Parse(await registered.Content.ReadAsStringAsync()).RootElement.GetProperty("client_id").GetString()!;
+
+        // The phone's token, from the password grant: it can't allow the app.
+        using HttpRequestMessage withToken = Allow(clientId, null);
+        withToken.Headers.Authorization = new("Bearer", access);
+        HttpResponseMessage refused = await Client().SendAsync(withToken);
+        Assert.DoesNotContain("code=", refused.Headers.Location?.Query ?? "");
+        Assert.Contains("error=access_denied", refused.Headers.Location?.Query ?? "");
+
+        // The person at the browser can.
+        Session admin = await SignInAsync("admin", AdminPassword);
+        using HttpRequestMessage fromBrowser = Allow(clientId, admin.Csrf);
+        HttpResponseMessage allowed = await admin.Http.SendAsync(fromBrowser);
+        Assert.Contains("code=", allowed.Headers.Location?.Query ?? "");
+    }
+
+    [Fact]
+    public async Task An_access_token_stops_when_its_sign_in_ends()
+    {
+        string access = await PhoneAccessTokenAsync();
+        Assert.Equal(HttpStatusCode.OK, (await BearerAsync(access, "/api/guard/me")).StatusCode);
+
+        using (IServiceScope scope = _factory!.Services.CreateScope())
+        {
+            Guid adminId = await MyIdAsync(await SignInAsync("admin", AdminPassword));
+            await scope.ServiceProvider.GetRequiredService<Services.AccountSessions>().EndEverywhereAsync(adminId, null, null, "everywhere");
+        }
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await BearerAsync(access, "/api/guard/me")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Switched_off_personal_tokens_sign_no_one_in()
+    {
+        Session admin = await SignInAsync("admin", AdminPassword);
+        (HttpStatusCode made, string body) = await admin.SendAsync(HttpMethod.Post, "/api/guard/me/tokens", new { name = "script", access = "write", days = 30 });
+        Assert.Equal(HttpStatusCode.OK, made);
+        string secret = JsonDocument.Parse(body).RootElement.GetProperty("secret").GetString()!;
+        Assert.Equal(HttpStatusCode.OK, (await BearerAsync(secret, "/api/guard/me")).StatusCode);
+
+        // The same site, started again with the feature off.
+        await _factory!.DisposeAsync();
+        Environment.SetEnvironmentVariable("Guard__Features__PersonalTokens", "false");
+        _factory = new WebApplicationFactory<Program>();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await BearerAsync(secret, "/api/guard/me")).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_narrower_merge_right_sees_and_resumes_only_its_own_merges()
+    {
+        Session admin = await SignInAsync("admin", AdminPassword);
+        Guid role = await CreateRoleAsync(admin, "merge-p",
+            """{ "action": "merge", "subject": "Account", "conditions": { "username": { "$in": ["p1", "p2"] } } }""");
+        Guid deduper = await CreateAccountAsync(admin, "deduper", "deduper@corp.example");
+        await GrantAsync(admin, role, deduper, new { });
+        Guid p1 = await CreateAccountAsync(admin, "p1", "p1@corp.example");
+        Guid p2 = await CreateAccountAsync(admin, "p2", "p2@corp.example");
+        Guid q1 = await CreateAccountAsync(admin, "q1", "q1@corp.example");
+        Guid q2 = await CreateAccountAsync(admin, "q2", "q2@corp.example");
+
+        Session d = await SignInAsync("deduper", Password);
+        (HttpStatusCode ok, string mine) = await d.SendAsync(HttpMethod.Post, $"/api/guard/accounts/{p1}/merge", new { survivorId = p2, confirm = "p1" });
+        Assert.Equal(HttpStatusCode.OK, ok);
+        Guid mineId = JsonDocument.Parse(mine).RootElement.GetProperty("id").GetGuid();
+        (_, string other) = await admin.SendAsync(HttpMethod.Post, $"/api/guard/accounts/{q1}/merge", new { survivorId = q2, confirm = "q1" });
+        Guid otherId = JsonDocument.Parse(other).RootElement.GetProperty("id").GetGuid();
+
+        (_, string listed) = await d.SendAsync(HttpMethod.Get, "/api/guard/merges");
+        Assert.Equal([mineId], JsonDocument.Parse(listed).RootElement.EnumerateArray().Select(m => m.GetProperty("id").GetGuid()));
+        Assert.Equal(HttpStatusCode.OK, (await d.SendAsync(HttpMethod.Get, $"/api/guard/merges/{mineId}")).Code);
+        Assert.Equal(HttpStatusCode.Forbidden, (await d.SendAsync(HttpMethod.Get, $"/api/guard/merges/{otherId}")).Code);
+        Assert.Equal(HttpStatusCode.Forbidden, (await d.SendAsync(HttpMethod.Post, $"/api/guard/merges/{otherId}/resume")).Code);
+
+        (_, string all) = await admin.SendAsync(HttpMethod.Get, "/api/guard/merges");
+        Assert.Equal(2, JsonDocument.Parse(all).RootElement.GetArrayLength());
+    }
+
+    /// <summary>The host's phone app, public with the password grant, as a host registers it; and an access token from it for the admin.</summary>
+    private async Task<string> PhoneAccessTokenAsync()
+    {
         _ = Client();
         using (IServiceScope scope = _factory!.Services.CreateScope())
         {
@@ -260,27 +345,18 @@ public sealed partial class SecurityTests : IAsyncLifetime
             });
         }
 
-        HttpResponseMessage registered = await Client().PostAsJsonAsync("/connect/register", new { client_name = "An app", redirect_uris = new[] { "https://app.example/cb" } });
-        Assert.Equal(HttpStatusCode.Created, registered.StatusCode);
-        string clientId = JsonDocument.Parse(await registered.Content.ReadAsStringAsync()).RootElement.GetProperty("client_id").GetString()!;
-
-        // The phone's token, from the password grant: it can't allow the app.
         HttpResponseMessage granted = await Client().PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = "password", ["client_id"] = "toda-mobile", ["username"] = "admin", ["password"] = AdminPassword, ["scope"] = "toda.api offline_access",
         }));
-        string access = JsonDocument.Parse(await granted.Content.ReadAsStringAsync()).RootElement.GetProperty("access_token").GetString()!;
-        using HttpRequestMessage withToken = Allow(clientId, null);
-        withToken.Headers.Authorization = new("Bearer", access);
-        HttpResponseMessage refused = await Client().SendAsync(withToken);
-        Assert.DoesNotContain("code=", refused.Headers.Location?.Query ?? "");
-        Assert.Contains("error=access_denied", refused.Headers.Location?.Query ?? "");
+        return JsonDocument.Parse(await granted.Content.ReadAsStringAsync()).RootElement.GetProperty("access_token").GetString()!;
+    }
 
-        // The person at the browser can.
-        Session admin = await SignInAsync("admin", AdminPassword);
-        using HttpRequestMessage fromBrowser = Allow(clientId, admin.Csrf);
-        HttpResponseMessage allowed = await admin.Http.SendAsync(fromBrowser);
-        Assert.Contains("code=", allowed.Headers.Location?.Query ?? "");
+    private async Task<HttpResponseMessage> BearerAsync(string token, string url)
+    {
+        using HttpRequestMessage request = new(HttpMethod.Get, url);
+        request.Headers.Authorization = new("Bearer", token);
+        return await Client().SendAsync(request);
     }
 
     /// <summary>The consent page's answer: allow, with write access, and the session's anti-forgery value when it has one.</summary>
