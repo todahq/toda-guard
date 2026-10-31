@@ -6,6 +6,10 @@ change the API.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-31
+
+The fixes from a security review of 0.1.0-preview.1, which they all affect: update, and stop using the preview.
+
 ### Security
 
 - Setting up an authenticator app with a sign-in ticket is refused when the ticket's second step is a code the site
@@ -39,6 +43,8 @@ change the API.
   settings ask for a step-up, as an admin's other changes do; a test keeps every new admin change to that.
 - `Guard:Seed:AdminPassword` needs at least 10 characters when the admin is made. The sample host keeps its password in
   `appsettings.Development.json`, so a copy started in Production needs one of its own.
+- Sign-in, handoff and consent redirects go through ASP.NET's `LocalRedirect` as well as Guard's own check: only a path
+  of this site, whatever a request or a misconfigured `Pages:Consent` says.
 - A data export is in the security log before its first byte goes out, and `privacy.export.ended` says after whether it
   finished (with what it held) or was cut off: a download stopped part way is logged too.
 - An app is granted `offline_access`, and so a refresh token, only when it asked for it.
