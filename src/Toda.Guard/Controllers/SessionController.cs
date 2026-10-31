@@ -243,7 +243,7 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
 
         if (code is not { Length: > 0 } || await sessions.TakeHandoffAsync(code, cancellationToken) is not { } handoff)
         {
-            return Redirect("/login?next=" + Uri.EscapeDataString(target));
+            return LocalRedirect("/login?next=" + Uri.EscapeDataString(target));
         }
 
         await EndPreviousAsync(cancellationToken);
@@ -256,7 +256,8 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
             WebSessionHandler.IssueLanguage(HttpContext, lang);
         }
 
-        return Redirect(target);
+        // SafeNext keeps only a path of this site; LocalRedirect refuses anything else as well.
+        return LocalRedirect(target);
     }
 
     /// <summary>Where to go on to: a page of this site (a path), never another site.</summary>

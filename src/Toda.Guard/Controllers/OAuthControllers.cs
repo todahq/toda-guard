@@ -55,7 +55,7 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb, IOptions<G
         {
             return request.HasPromptValue(PromptValues.None)
                 ? Refuse(Errors.LoginRequired, $"Sign in to {options.Value.Texts.Product()} first.")
-                : Redirect("/login?next=" + Uri.EscapeDataString("/connect/authorize" + query));
+                : LocalRedirect("/login?next=" + Uri.EscapeDataString("/connect/authorize" + query));
         }
 
         // The browser's session only: any bearer token (the phone's or a script's from the token endpoint too) skips the
@@ -77,7 +77,8 @@ public class AuthorizationController(OAuthApps apps, GuardDb guardDb, IOptions<G
         {
             return request.HasPromptValue(PromptValues.None)
                 ? Refuse(Errors.ConsentRequired, "The person hasn't allowed this app yet.")
-                : Redirect(options.Value.Pages.Consent + query);
+                // The consent page is a path of this site (GuardPageOptions); the request only adds its encoded query.
+                : LocalRedirect(options.Value.Pages.Consent + query);
         }
 
         if (decision != "allow")

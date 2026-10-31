@@ -43,7 +43,7 @@ public sealed partial class SecurityTests : IAsyncLifetime
     private static readonly Guid Internal = Guid.Parse("00000000-0000-0000-0000-00000000d001");
     private static readonly Guid Admins = Guid.Parse("00000000-0000-0000-0000-00000000a001");
     private static readonly Guid Helpdesk = Guid.Parse("00000000-0000-0000-0000-0000000000b2");
-    private static readonly string[] Features = ["Merges", "OAuthApps", "ClientRegistration"];
+    private static readonly string[] Features = ["Merges", "OAuthApps", "ClientRegistration", "Handoff"];
 
     private readonly string _database = "guard_security_" + Guid.NewGuid().ToString("N")[..12];
     private readonly string _mail = Path.Combine(Path.GetTempPath(), "guard-security-mail-" + Guid.NewGuid().ToString("N"));
@@ -541,6 +541,31 @@ public sealed partial class SecurityTests : IAsyncLifetime
 
             throw new OperationCanceledException("The download was cut off part way.");
         }
+    }
+
+    [Fact]
+    public async Task Redirects_stay_on_the_site()
+    {
+        // A handoff goes on to a page of this site only: another site's address, however written, ends at sign-in for "/".
+        foreach ((string next, string expected) in new[]
+        {
+            ("//evil.example/x", "/login?next=%2F"), ("/\\evil.example", "/login?next=%2F"), ("https://evil.example", "/login?next=%2F"),
+            ("/\tevil.example", "/login?next=%2F"), ("/projects/1", "/login?next=%2Fprojects%2F1"),
+        })
+        {
+            HttpResponseMessage handoff = await Client().GetAsync($"/api/guard/session/handoff?code=unknown&next={Uri.EscapeDataString(next)}");
+            Assert.Equal(HttpStatusCode.Redirect, handoff.StatusCode);
+            Assert.Equal(expected, handoff.Headers.Location!.OriginalString);
+        }
+
+        // An app's sign-in goes to the site's own consent page, with the request's query and nothing else.
+        Session admin = await SignInAsync("admin", AdminPassword);
+        string clientId = await RegisterAppAsync();
+        HttpResponseMessage asked = await admin.Http.GetAsync(
+            $"/connect/authorize?client_id={clientId}&redirect_uri={Uri.EscapeDataString("https://app.example/cb")}&response_type=code&scope=toda.api"
+            + "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&state=s");
+        Assert.Equal(HttpStatusCode.Redirect, asked.StatusCode);
+        Assert.StartsWith("/oauth/consent?", asked.Headers.Location!.OriginalString, StringComparison.Ordinal);
     }
 
     /// <summary>The host's phone app, public with the password grant, as a host registers it; and an access token from it for the admin.</summary>
