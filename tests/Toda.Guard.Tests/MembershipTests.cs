@@ -67,7 +67,7 @@ public class MembershipTests
         Assert.Contains(groups, g => g.Group == corpEveryone && g.Direct);
         Assert.Equal(["Corp (everyone)", "customers"], groups.Single(g => g.Group == customers).Path);
         Assert.DoesNotContain(groups, g => g.Group == internalEveryone);
-        Assert.Empty(_memberships.Where(m => m.GroupId == corpEveryone.Id));
+        Assert.DoesNotContain(_memberships, m => m.GroupId == corpEveryone.Id);
     }
 
     [Fact]

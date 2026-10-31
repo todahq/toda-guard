@@ -4,10 +4,12 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using OpenIddict.Abstractions;
@@ -405,6 +407,142 @@ public sealed partial class SecurityTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task An_export_is_in_the_log_before_it_goes_out_and_how_it_ended_after()
+    {
+        Session admin = await SignInAsync("admin", AdminPassword);
+        Assert.Equal(HttpStatusCode.OK, (await admin.SendAsync(HttpMethod.Post, "/api/guard/me/data-export", new { })).Code);
+        Assert.Equal([("privacy.export.self", "started"), ("privacy.export.ended", "finished")], await ExportEventsAsync());
+
+        // A download that breaks part way: some of the data may have gone; the log has the export, and that it was cut off.
+        await using WebApplicationFactory<Program> failing = _factory!.WithWebHostBuilder(host => host.ConfigureTestServices(s =>
+        {
+            s.AddTransient<IPersonalDataDeclarations, BreakingStore>();
+            s.AddTransient<IPersonalDataExporter, BreakingStore>();
+        }));
+        HttpClient http = failing.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true, AllowAutoRedirect = false });
+        HttpResponseMessage signedIn = await http.PostAsJsonAsync("/api/guard/session", new { username = "admin", password = AdminPassword });
+        string prefix = new GuardCookieOptions().Csrf + "=";
+        Session again = new(http, Uri.UnescapeDataString(signedIn.Headers.GetValues("Set-Cookie").First(c => c.StartsWith(prefix, StringComparison.Ordinal))[prefix.Length..].Split(';')[0]));
+        try
+        {
+            await again.SendAsync(HttpMethod.Post, "/api/guard/me/data-export", new { });
+        }
+        catch (Exception)
+        {
+            // The download broke, as it should; what matters is what the log says.
+        }
+
+        Assert.Equal([("privacy.export.self", "started"), ("privacy.export.ended", "finished"), ("privacy.export.self", "started"), ("privacy.export.ended", "aborted")],
+            await ExportEventsAsync());
+    }
+
+    [Fact]
+    public async Task An_app_refreshes_only_when_it_asked_to()
+    {
+        Session admin = await SignInAsync("admin", AdminPassword);
+        string clientId = await RegisterAppAsync();
+        Assert.False((await AppTokensAsync(admin, clientId, "toda.api")).TryGetProperty("refresh_token", out _));
+        Assert.True((await AppTokensAsync(admin, clientId, "toda.api offline_access")).TryGetProperty("refresh_token", out _));
+    }
+
+    [Fact]
+    public async Task Switched_off_apps_leave_nothing_to_reach()
+    {
+        // Apps on, registering off: discovery names no registration endpoint.
+        Environment.SetEnvironmentVariable("Guard__Features__ClientRegistration", "false");
+        await using (WebApplicationFactory<Program> noRegistration = new())
+        {
+            JsonElement discovery = JsonDocument.Parse(await noRegistration.CreateClient().GetStringAsync("/.well-known/openid-configuration")).RootElement;
+            Assert.False(discovery.TryGetProperty("registration_endpoint", out _));
+            Assert.True(discovery.TryGetProperty("authorization_endpoint", out _));
+        }
+
+        Environment.SetEnvironmentVariable("Guard__Features__ClientRegistration", "true");
+        Session admin = await SignInAsync("admin", AdminPassword);
+        string access = (await AppTokensAsync(admin, await RegisterAppAsync(), "toda.api")).GetProperty("access_token").GetString()!;
+        Assert.Equal(HttpStatusCode.OK, (await BearerAsync(access, "/api/guard/me")).StatusCode);
+
+        // The same site started again with apps off: no flow, nothing in discovery, and the app's token stops.
+        await _factory!.DisposeAsync();
+        Environment.SetEnvironmentVariable("Guard__Features__OAuthApps", "false");
+        _factory = new WebApplicationFactory<Program>();
+        JsonElement off = JsonDocument.Parse(await Client().GetStringAsync("/.well-known/openid-configuration")).RootElement;
+        Assert.False(off.TryGetProperty("authorization_endpoint", out _));
+        Assert.False(off.TryGetProperty("registration_endpoint", out _));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await BearerAsync(access, "/api/guard/me")).StatusCode);
+    }
+
+    private async Task<string> RegisterAppAsync()
+    {
+        HttpResponseMessage registered = await Client().PostAsJsonAsync("/connect/register", new { client_name = "An app", redirect_uris = new[] { "https://app.example/cb" } });
+        Assert.Equal(HttpStatusCode.Created, registered.StatusCode);
+        return JsonDocument.Parse(await registered.Content.ReadAsStringAsync()).RootElement.GetProperty("client_id").GetString()!;
+    }
+
+    /// <summary>The person at the browser allows the app the scopes it asked for, and the app exchanges its code.</summary>
+    private async Task<JsonElement> AppTokensAsync(Session person, string clientId, string scope)
+    {
+        string verifier = Verifier();
+        using HttpRequestMessage allow = Allow(clientId, person.Csrf, scope, verifier);
+        HttpResponseMessage allowed = await person.Http.SendAsync(allow);
+        string code = System.Web.HttpUtility.ParseQueryString(allowed.Headers.Location!.Query)["code"]!;
+        HttpResponseMessage tokens = await Client().PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code", ["client_id"] = clientId, ["code"] = code, ["redirect_uri"] = "https://app.example/cb", ["code_verifier"] = verifier,
+        }));
+        string body = await tokens.Content.ReadAsStringAsync();
+        Assert.True(tokens.IsSuccessStatusCode, body);
+        return JsonDocument.Parse(body).RootElement.Clone();
+    }
+
+    /// <summary>The data exports in the security log, oldest first: their type and state.</summary>
+    private async Task<List<(string, string)>> ExportEventsAsync()
+    {
+        await using NpgsqlConnection connection = new($"{Server};Database={_database}");
+        await connection.OpenAsync();
+        await using NpgsqlCommand read = new("""SELECT "Type", "Detail" FROM guard.security_events WHERE "Type" LIKE 'privacy.export.%' ORDER BY "Time" """, connection);
+        await using NpgsqlDataReader rows = await read.ExecuteReaderAsync();
+        List<(string, string)> events = [];
+        while (await rows.ReadAsync())
+        {
+            events.Add((rows.GetString(0), JsonDocument.Parse(rows.GetString(1)).RootElement.GetProperty("state").GetString()!));
+        }
+
+        return events;
+    }
+
+    /// <summary>
+    /// A host's store whose export stops part way, after some rows have gone out, as when the person downloading hangs up
+    /// (a store that fails otherwise is only listed as missing, and the export finishes).
+    /// </summary>
+    private sealed class BreakingStore : IPersonalDataDeclarations, IPersonalDataExporter
+    {
+        public IReadOnlyList<PersonalDataStore> Stores { get; } =
+        [
+            new("test.breaking", "test", new LocalizedText("Breaking", "Breaking"), new LocalizedText("p", "p"), [], [], PersonalDataSubjects.Accounts,
+                [PersonalDataKinds.Activity], PersonalDataKept.Forever, [], []),
+        ];
+
+        public IReadOnlyList<NonPersonalTable> NotPersonal { get; } = [];
+
+        IReadOnlyList<string> IPersonalDataExporter.Stores { get; } = ["test.breaking"];
+
+        public Task ExportAsync(IPersonalDataExport export, CancellationToken cancellationToken = default) =>
+            export.WriteAsync("test.breaking", "rows", Rows(), cancellationToken);
+
+        private static async IAsyncEnumerable<JsonObject> Rows()
+        {
+            for (int i = 0; i < 100; i++)
+            {
+                await Task.Yield();
+                yield return new JsonObject { ["n"] = i };
+            }
+
+            throw new OperationCanceledException("The download was cut off part way.");
+        }
+    }
+
     /// <summary>The host's phone app, public with the password grant, as a host registers it; and an access token from it for the admin.</summary>
     private async Task<string> PhoneAccessTokenAsync()
     {
@@ -438,12 +576,15 @@ public sealed partial class SecurityTests : IAsyncLifetime
     }
 
     /// <summary>The consent page's answer: allow, with write access, and the session's anti-forgery value when it has one.</summary>
-    private static HttpRequestMessage Allow(string clientId, string? csrf)
+    private static HttpRequestMessage Allow(string clientId, string? csrf) => Allow(clientId, csrf, "toda.api offline_access", Verifier());
+
+    private static string Verifier() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    private static HttpRequestMessage Allow(string clientId, string? csrf, string scope, string verifier)
     {
-        string verifier = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         Dictionary<string, string> form = new()
         {
-            ["client_id"] = clientId, ["redirect_uri"] = "https://app.example/cb", ["response_type"] = "code", ["scope"] = "toda.api offline_access",
+            ["client_id"] = clientId, ["redirect_uri"] = "https://app.example/cb", ["response_type"] = "code", ["scope"] = scope,
             ["code_challenge"] = Convert.ToBase64String(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))).TrimEnd('=').Replace('+', '-').Replace('/', '_'),
             ["code_challenge_method"] = "S256", ["state"] = "s", ["decision"] = "allow", ["access"] = "write",
         };

@@ -39,8 +39,19 @@ change the API.
   settings ask for a step-up, as an admin's other changes do; a test keeps every new admin change to that.
 - `Guard:Seed:AdminPassword` needs at least 10 characters when the admin is made. The sample host keeps its password in
   `appsettings.Development.json`, so a copy started in Production needs one of its own.
+- A data export is in the security log before its first byte goes out, and `privacy.export.ended` says after whether it
+  finished (with what it held) or was cut off: a download stopped part way is logged too.
+- An app is granted `offline_access`, and so a refresh token, only when it asked for it.
+- With `Features:OAuthApps` off, the code flow and the authorization endpoint go too, discovery names neither them nor
+  the registration endpoint, and apps' tokens issued before stop (their refresh is refused). With `ClientRegistration`
+  off, discovery no longer names the registration endpoint.
 
 ### Changed
+
+- A data export's own entry in the security log (`privacy.export.self`, `.account`, `.address`) now holds
+  `{ state: "started", files }`; what it held is in the `privacy.export.ended` entry that follows it.
+- One OpenIddict version for all its packages (7.7.1), and no explicit `Microsoft.Extensions.Identity.Core` (it comes
+  with ASP.NET Core).
 
 - Adding, removing or choosing an account's addresses (`POST /api/guard/accounts/{id}/emails`,
   `DELETE …/emails/{emailId}`, `PUT …/mail-to`) needs the Admin policy; an `update` right on accounts no longer

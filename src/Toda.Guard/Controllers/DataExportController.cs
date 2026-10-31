@@ -92,14 +92,28 @@ public class DataExportController(PersonalDataExports exports, GuardDb guardDb, 
         HttpContext.Features.Get<IHttpBodyControlFeature>()?.AllowSynchronousIO = true;
         Response.ContentType = "application/zip";
         Response.Headers.ContentDisposition = $"attachment; filename=\"data-{Safe(fileName)}-{DateTime.UtcNow:yyyy-MM-dd}.zip\"";
-        DataExportSummary summary = await exports.WriteAsync(Response.Body, subject, about, requestedBy, site.RequestLanguage, files, cancellationToken);
-        await audit.WriteAsync(auditType, target, new
+
+        // In the log before the first byte goes out: a download cut off part way has still taken some of the person's data.
+        await audit.WriteAsync(auditType, target, new { state = "started", files }, CancellationToken.None);
+        DataExportSummary? summary = null;
+        try
         {
-            stores = summary.Rows,
-            noLongerReadable = summary.NoLongerReadable,
-            files = summary.Files,
-            missing = summary.Missing.Select(m => m.Store),
-        }, CancellationToken.None);
+            summary = await exports.WriteAsync(Response.Body, subject, about, requestedBy, site.RequestLanguage, files, cancellationToken);
+        }
+        finally
+        {
+            await audit.WriteAsync(SecurityAuditTypes.PrivacyExportEnded, target, summary is null
+                ? new { export = auditType, state = "aborted" }
+                : new
+                {
+                    export = auditType,
+                    state = "finished",
+                    stores = summary.Rows,
+                    noLongerReadable = summary.NoLongerReadable,
+                    files = summary.Files,
+                    missing = summary.Missing.Select(m => m.Store),
+                }, CancellationToken.None);
+        }
     }
 
     private static string Safe(string name) => new([.. name.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '-')]);

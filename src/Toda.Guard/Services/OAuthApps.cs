@@ -43,8 +43,11 @@ public static class OAuthAgents
     public const string Registered = "registered";
     public const string Made = "admin";
 
-    /// <summary>What an app a person allows is granted: the host's API (GuardOptions.ApiScope) and refreshing.</summary>
-    public static ImmutableArray<string> GrantedScopes(string apiScope) => [apiScope, Scopes.OfflineAccess];
+    /// <summary>
+    /// What an app a person allows is granted: the host's API (GuardOptions.ApiScope), and refreshing (a refresh token)
+    /// only when the app asked for it.
+    /// </summary>
+    public static ImmutableArray<string> GrantedScopes(string apiScope, bool offline) => offline ? [apiScope, Scopes.OfflineAccess] : [apiScope];
 }
 
 /// <summary>
@@ -143,12 +146,13 @@ public sealed class OAuthApps(IOpenIddictApplicationManager applications, IOpenI
     {
         object app = await FindAsync(clientId, cancellationToken);
         string appId = (await applications.GetIdAsync(app, cancellationToken))!;
-        // The person's latest answer stands: the same access keeps the permission they gave before; another replaces it,
-        // ending what the app got under the old one.
+        // The person's latest answer stands: the same access and scopes keep the permission they gave before; another
+        // replaces it, ending what the app got under the old one.
         foreach (object earlier in await All(authorizations.FindAsync(accountId.ToString(), appId, Statuses.Valid, AuthorizationTypes.Permanent, null, cancellationToken)))
         {
             ImmutableDictionary<string, JsonElement> given = await authorizations.GetPropertiesAsync(earlier, cancellationToken);
-            if (given.TryGetValue(names.Value.AppAccessProperty, out JsonElement was) && was.GetString() == access)
+            if (given.TryGetValue(names.Value.AppAccessProperty, out JsonElement was) && was.GetString() == access
+                && (await authorizations.GetScopesAsync(earlier, cancellationToken)).ToHashSet().SetEquals(scopes))
             {
                 return (await authorizations.GetIdAsync(earlier, cancellationToken))!;
             }

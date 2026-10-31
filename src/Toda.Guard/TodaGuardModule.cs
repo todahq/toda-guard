@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -101,6 +102,17 @@ public class TodaGuardModule : AbpModule
                 server.Scopes.Add(guard.Value.ApiScope);
                 server.Scopes.Add(names.Value.ReadScope);
                 server.GrantTypes.Add(names.Value.SecondFactorGrantType);
+            })
+            // Apps switched off (Features:OAuthApps): no authorization endpoint and no code flow, so nothing is left of
+            // them to reach. After OpenIddict's own configuration, which allows the flow.
+            .PostConfigure<Microsoft.Extensions.Options.IOptions<GuardOptions>>((server, guard) =>
+            {
+                if (!guard.Value.Features.OAuthApps)
+                {
+                    server.AuthorizationEndpointUris.Clear();
+                    server.GrantTypes.Remove(OpenIddictConstants.GrantTypes.AuthorizationCode);
+                    server.ResponseTypes.Remove(OpenIddictConstants.ResponseTypes.Code);
+                }
             });
         context.Services.AddOpenIddict()
             .AddCore(options => options.UseEntityFrameworkCore().UseDbContext<OidcDbContext>().ReplaceDefaultEntities<Guid>())
@@ -119,10 +131,17 @@ public class TodaGuardModule : AbpModule
                 {
                     if (context.Issuer is { } issuer)
                     {
-                        context.Metadata["registration_endpoint"] = new Uri(issuer, "connect/register").AbsoluteUri;
+                        // Only what's on: apps (Features:OAuthApps), and their registering themselves (ClientRegistration).
+                        GuardFeatures features = context.Transaction.GetHttpRequest()!.HttpContext.RequestServices
+                            .GetRequiredService<Microsoft.Extensions.Options.IOptions<GuardOptions>>().Value.Features;
+                        if (features.OAuthApps && features.ClientRegistration)
+                        {
+                            context.Metadata["registration_endpoint"] = new Uri(issuer, "connect/register").AbsoluteUri;
+                        }
+
                         // Behind the web app, the endpoints are where the issuer is (the site's public address), not
                         // where this request came in.
-                        context.AuthorizationEndpoint = new Uri(issuer, "connect/authorize");
+                        context.AuthorizationEndpoint = features.OAuthApps ? new Uri(issuer, "connect/authorize") : null;
                         context.TokenEndpoint = new Uri(issuer, "connect/token");
                         context.RevocationEndpoint = new Uri(issuer, "connect/revoke");
                         context.JsonWebKeySetEndpoint = new Uri(issuer, ".well-known/jwks");
@@ -157,6 +176,18 @@ public class TodaGuardModule : AbpModule
                 // a lock or a merge stops an access token at once, not when its 15 minutes run out.
                 options.EnableTokenEntryValidation();
                 options.EnableAuthorizationEntryValidation();
+                // Apps switched off: their access tokens, issued before, stop too (their refresh is refused at the token endpoint).
+                options.AddEventHandler<OpenIddict.Validation.OpenIddictValidationEvents.ProcessAuthenticationContext>(handler => handler.UseInlineHandler(context =>
+                {
+                    IServiceProvider services = context.Transaction.GetHttpRequest()!.HttpContext.RequestServices;
+                    if (!services.GetRequiredService<Microsoft.Extensions.Options.IOptions<GuardOptions>>().Value.Features.OAuthApps
+                        && context.AccessTokenPrincipal?.HasClaim(services.GetRequiredService<Microsoft.Extensions.Options.IOptions<GuardNames>>().Value.TokenClaim) == true)
+                    {
+                        context.Reject(OpenIddictConstants.Errors.InvalidToken, "Apps are switched off on this site.");
+                    }
+
+                    return default;
+                }).SetOrder(OpenIddict.Validation.OpenIddictValidationHandlers.ValidateAccessToken.Descriptor.Order + 1_000));
             });
 
         // A bearer token is either an access token from the token endpoint (OpenIddict) or a personal access token (M7). A
