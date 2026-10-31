@@ -6,9 +6,9 @@ change the API.
 
 ## [Unreleased]
 
-## [0.1.0-preview.2] - 2026-10-31
+## [0.1.0] - 2026-10-31
 
-The fixes from a security review of 0.1.0-preview.1, which they all affect: update, and stop using preview.1.
+The fixes from a security review of 0.1.0-preview.1, which they all affect: update, and stop using the preview.
 
 ### Security
 
