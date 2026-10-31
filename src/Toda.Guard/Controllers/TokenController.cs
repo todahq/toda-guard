@@ -194,6 +194,11 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
     /// </summary>
     private async Task<IActionResult> AppTokensAsync(ClaimsPrincipal? granted, CancellationToken cancellationToken)
     {
+        if (!options.Value.Features.OAuthApps)
+        {
+            return Refuse("Apps are switched off on this site.");
+        }
+
         if (!Guid.TryParse(granted?.GetClaim(Claims.Subject), out Guid accountId) || !await apps.IsValidAsync(granted!.GetAuthorizationId(), cancellationToken))
         {
             return Refuse("The app is no longer allowed: ask the person again.");

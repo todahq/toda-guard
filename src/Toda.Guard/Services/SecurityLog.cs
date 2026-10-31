@@ -79,6 +79,12 @@ public static class SecurityAuditTypes
     public const string PrivacyExportSelf = "privacy.export.self";
     public const string PrivacyExportAccount = "privacy.export.account";
     public const string PrivacyExportAddress = "privacy.export.address";
+
+    /// <summary>
+    /// How an export written to the log as it began went: finished, with what it held, or aborted (the download was
+    /// cut off, by the client or an error) after some of it may have gone out.
+    /// </summary>
+    public const string PrivacyExportEnded = "privacy.export.ended";
 }
 
 /// <summary>
