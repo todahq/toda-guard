@@ -89,6 +89,7 @@ public class ServiceAccountsController(GuardDb guardDb, ServiceAccountMaker make
     }, cancellationToken: cancellationToken);
 
     [HttpPost]
+    [StepUp]
     public async Task<ServiceAccountDto> Create([FromBody] CreateServiceAccountInput input, CancellationToken cancellationToken)
     {
         (Account account, string directory) = await maker.MakeAsync(new ServiceAccountInput(input.Username ?? "") { DisplayName = input.DisplayName }, cancellationToken);

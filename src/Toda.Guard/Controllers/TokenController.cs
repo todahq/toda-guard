@@ -160,7 +160,8 @@ public class TokenController(AuthService auth, GuardDb guardDb, IOpenIddictToken
                         await tokens.TryRevokeAsync(token, cancellationToken);
                     }
 
-                    return Refuse(stepUp.EndSession ? "Too many wrong passwords: the session has ended. Sign in again." : "The password is incorrect.",
+                    return Refuse(stepUp.EndSession ? "Too many wrong passwords: the session has ended. Sign in again."
+                        : stepUp.Blocked ? "Too many failed attempts. Try again in 15 minutes." : "The password is incorrect.",
                         stepUp.EndSession ? SessionEndedError : StepUpFailedError);
                 }
 

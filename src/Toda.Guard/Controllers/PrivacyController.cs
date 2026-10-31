@@ -39,6 +39,7 @@ public class PrivacyController(PersonalDataCatalog catalog, IPluginPersonalDataS
     public Task<IReadOnlyList<InstalledPlugin>> Plugins(CancellationToken cancellationToken) => plugins.ListAsync(cancellationToken);
 
     [HttpPut("stores/{key}")]
+    [StepUp]
     public async Task<PrivacyRecordedDto> SaveStore(string key, [FromBody] PrivacyStoreInput input, CancellationToken cancellationToken)
     {
         PrivacyMapDto map = await catalog.MapAsync(cancellationToken);
@@ -82,6 +83,7 @@ public class PrivacyController(PersonalDataCatalog catalog, IPluginPersonalDataS
     }
 
     [HttpPut("settings")]
+    [StepUp]
     public Task<PrivacySettingsDto> SaveSettings([FromBody] PrivacySettingsInput input, CancellationToken cancellationToken)
     {
         PrivacyContactDto controller = Contact(input.Controller, "controller");

@@ -17,6 +17,8 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
     Microsoft.Extensions.Options.IOptions<GuardOptions> options, ILogger<GuardSeeder> logger)
     : ITransientDependency
 {
+    private const int MinAdminPassword = 10;
+
     public Task SeedAsync(CancellationToken cancellationToken = default)
     {
         if (configuration.GetValue("Guard:TwoFactor:Disabled", false))
@@ -40,6 +42,12 @@ public class GuardSeeder(GuardDb guardDb, AccountProjector projector, IConfigura
             ?? throw new InvalidOperationException("Guard:Seed:AdminPassword is not configured.");
         if (!await db.DirectoryUsers.AnyAsync(u => u.DirectoryId == GuardConstants.InternalDirectoryId && u.NormalizedUsername == "admin", cancellationToken))
         {
+            // The rule every other password keeps; checked when the admin is made, so a site already running still starts.
+            if (adminPassword.Length < MinAdminPassword)
+            {
+                throw new InvalidOperationException($"Guard:Seed:AdminPassword needs at least {MinAdminPassword} characters, as every password does.");
+            }
+
             DirectoryUser admin = new(Guid.NewGuid(), GuardConstants.InternalDirectoryId, "internal:admin", "admin")
             {
                 DisplayName = seed.AdminDisplayName,
