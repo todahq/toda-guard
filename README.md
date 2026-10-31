@@ -69,7 +69,9 @@ Configure it in the `Guard` section (`GuardOptions`):
 - **Texts:** `Texts` holds your product's name in Guard's messages (`Texts:ProductName`), or templates of your own.
 - **First start:** `SignUp:Open` opens sign-up into the internal directory; it is closed by default, and an admin's
   later choice stays. `Seed` names what the first start makes: the admin's display name and email, the internal
-  directory, and the admins and users groups with their descriptions. The admin's password is `Seed:AdminPassword`.
+  directory, and the admins and users groups with their descriptions. The admin's password is `Seed:AdminPassword`,
+  at least 10 characters: keep it in a secret store or an environment variable, not in `appsettings.json`. The sample
+  host keeps its own in `appsettings.Development.json`, so it starts only in Development until you give one.
 - **Two-factor:** `TwoFactor:Issuer` is the name authenticator apps show. By default it is your product's English name
   and the site's host. Set `TwoFactor:ListsRecovery` to list "recovery" among the second step's methods when the person
   has recovery codes left.
@@ -88,6 +90,19 @@ server needs the same certificate with its private key.
 A host can replace each of Guard's seams with its own service: `IGuardMessenger`, `IGuardLocks`, `IGuardRateLimits`,
 `IGuardEventSink`, `IGuardBroadcast`, `IGuardSiteDefaults`, `ISignUpChallenges` and `ITokenRestrictions`. Otherwise
 Guard uses its defaults.
+
+**Behind a proxy or load balancer**, tell ASP.NET Core which proxies to trust, before Guard's middleware, so Guard sees
+each person's own address and scheme. Sign-in limits count wrong passwords per IP address; without this, every request
+comes from the proxy's address and shares one count:
+
+```csharp
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    o.KnownProxies.Add(IPAddress.Parse("10.0.0.10"));   // your proxy's address; or KnownNetworks for a range
+});
+app.UseForwardedHeaders();
+```
 
 Comments in the code cite design records by number, such as "ADR 0087". These are Toda's architecture decision records.
 `docs/adr/0087-guard-as-a-package.md` is the one that made Guard a package.

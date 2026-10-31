@@ -83,6 +83,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
     /// <summary>Creates a user in an internal directory (Toda's own by default).</summary>
     [HttpPost]
+    [StepUp]
     public async Task<AccountDto> Create([FromBody] CreateAccountInput input, CancellationToken cancellationToken)
     {
         Ensure(await AbilityAsync(cancellationToken), "create", "Account");
@@ -138,6 +139,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
     }
 
     [HttpPost("{id:guid}/lock")]
+    [StepUp]
     public Task<AccountDto> Lock(Guid id, CancellationToken cancellationToken) => SetLockedAsync(id, locked: true, cancellationToken);
 
     [HttpPost("{id:guid}/unlock")]
@@ -253,6 +255,7 @@ public class AccountsController(GuardDb guardDb, MembershipGraph graph, AccountP
 
     [HttpDelete("{id:guid}/emails/{emailId:guid}")]
     [Authorize(Policy = GuardPolicies.Admin)]
+    [StepUp]
     public async Task<AccountEmailsDto> RemoveEmail(Guid id, Guid emailId, CancellationToken cancellationToken)
     {
         Account account = await AccountAsync(id, cancellationToken);

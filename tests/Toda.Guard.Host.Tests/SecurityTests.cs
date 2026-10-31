@@ -1,9 +1,12 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -44,6 +47,9 @@ public sealed partial class SecurityTests : IAsyncLifetime
     private readonly string _mail = Path.Combine(Path.GetTempPath(), "guard-security-mail-" + Guid.NewGuid().ToString("N"));
     private WebApplicationFactory<Program>? _factory;
 
+    /// <summary>The header a test gives a request's client address in: the test server has none of its own.</summary>
+    private const string TestIpHeader = "X-Test-Ip";
+
     public Task InitializeAsync()
     {
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
@@ -55,7 +61,7 @@ public sealed partial class SecurityTests : IAsyncLifetime
             Environment.SetEnvironmentVariable($"Guard__Features__{feature}", "true");
         }
 
-        _factory = new WebApplicationFactory<Program>();
+        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host.ConfigureServices(s => s.AddSingleton<IStartupFilter>(new TestAddresses())));
         return Task.CompletedTask;
     }
 
@@ -327,6 +333,78 @@ public sealed partial class SecurityTests : IAsyncLifetime
         Assert.Equal(2, JsonDocument.Parse(all).RootElement.GetArrayLength());
     }
 
+    [Fact]
+    public async Task Wrong_passwords_from_elsewhere_lock_no_one_out_nor_end_their_session()
+    {
+        Session admin = await SignInAsync("admin", AdminPassword);
+        await CreateAccountAsync(admin, "ivan", "ivan@example.test");
+
+        // Someone elsewhere runs out the name's tries from their address; the person still signs in from theirs.
+        HttpClient attacker = Client("203.0.113.9");
+        HttpResponseMessage[] guesses = [.. await Task.WhenAll(Enumerable.Range(0, 6).Select(i =>
+            attacker.PostAsJsonAsync("/api/guard/session", new { username = "ivan", password = $"Wrong-Pass-{i:D4}" })))];
+        Assert.Contains(guesses, r => r.StatusCode == HttpStatusCode.TooManyRequests);
+        HttpClient own = Client("198.51.100.7");
+        HttpResponseMessage signedIn = await own.PostAsJsonAsync("/api/guard/session", new { username = "ivan", password = Password });
+        Assert.Equal(HttpStatusCode.OK, signedIn.StatusCode);
+        string prefix = new GuardCookieOptions().Csrf + "=";
+        Session ivan = new(own, Uri.UnescapeDataString(signedIn.Headers.GetValues("Set-Cookie").First(c => c.StartsWith(prefix, StringComparison.Ordinal))[prefix.Length..].Split(';')[0]));
+
+        // From the person's own address (a shared office's, say), the name blocked: a right step-up is refused for now,
+        // and the session stays.
+        HttpClient office = Client("198.51.100.7");
+        for (int i = 0; i < 5; i++)
+        {
+            await office.PostAsJsonAsync("/api/guard/session", new { username = "ivan", password = $"Office-Guess-{i:D4}" });
+        }
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await ivan.SendAsync(HttpMethod.Post, "/api/guard/session/step-up", new { password = Password })).Code);
+        Assert.Equal(HttpStatusCode.OK, (await ivan.SendAsync(HttpMethod.Get, "/api/guard/me")).Code);
+    }
+
+    [Fact]
+    public async Task An_unknown_username_takes_as_long_as_a_wrong_password()
+    {
+        Session admin = await SignInAsync("admin", AdminPassword);
+        await CreateAccountAsync(admin, "judy", "judy@example.test");
+        _ = await Client("192.0.2.1").PostAsJsonAsync("/api/guard/session", new { username = "warm-up", password = "Wrong-Pass-0000" });
+
+        async Task<double> MedianAsync(Func<int, string> username)
+        {
+            List<double> times = [];
+            for (int i = 0; i < 4; i++)
+            {
+                Stopwatch watch = Stopwatch.StartNew();
+                HttpResponseMessage refused = await Client($"192.0.2.{10 + i}").PostAsJsonAsync("/api/guard/session", new { username = username(i), password = "Wrong-Pass-1234" });
+                watch.Stop();
+                Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+                times.Add(watch.Elapsed.TotalMilliseconds);
+            }
+
+            return times.Order().ElementAt(times.Count / 2);
+        }
+
+        double known = await MedianAsync(_ => "judy");
+        double unknown = await MedianAsync(i => $"nobody-{i}");
+        Assert.True(unknown >= known * 0.5, $"unknown {unknown:F1} ms against known {known:F1} ms");
+    }
+
+    [Fact]
+    public async Task The_admin_isnt_made_with_a_short_password()
+    {
+        Environment.SetEnvironmentVariable("Guard__Seed__AdminPassword", "short");
+        try
+        {
+            await using WebApplicationFactory<Program> weak = new();
+            Exception refused = Assert.ThrowsAny<Exception>(() => weak.CreateClient());
+            Assert.Contains("AdminPassword", refused.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Guard__Seed__AdminPassword", AdminPassword);
+        }
+    }
+
     /// <summary>The host's phone app, public with the password grant, as a host registers it; and an access token from it for the admin.</summary>
     private async Task<string> PhoneAccessTokenAsync()
     {
@@ -408,7 +486,34 @@ public sealed partial class SecurityTests : IAsyncLifetime
         }
     }
 
-    private HttpClient Client() => _factory!.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true, AllowAutoRedirect = false });
+    private HttpClient Client(string? ip = null)
+    {
+        HttpClient client = _factory!.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true, AllowAutoRedirect = false });
+        if (ip is not null)
+        {
+            client.DefaultRequestHeaders.Add(TestIpHeader, ip);
+        }
+
+        return client;
+    }
+
+    /// <summary>Gives each request the client address its test header names, ahead of the host's own middleware.</summary>
+    private sealed class TestAddresses : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use((context, rest) =>
+            {
+                if (context.Request.Headers.TryGetValue(TestIpHeader, out Microsoft.Extensions.Primitives.StringValues ip))
+                {
+                    context.Connection.RemoteIpAddress = IPAddress.Parse(ip.ToString());
+                }
+
+                return rest(context);
+            });
+            next(app);
+        };
+    }
 
     private async Task<Session> SignInAsync(string username, string password)
     {

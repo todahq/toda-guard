@@ -30,6 +30,15 @@ change the API.
 - A merge right short of an admin's lists, reads and resumes only the merges of accounts it may merge; resuming takes a
   step-up.
 - CI pins each action by commit SHA, and Dependabot keeps the pins current.
+- A sign-in refused before a password was checked (no such username, an account that can't sign in) takes as long as a
+  wrong password, so its speed doesn't tell which usernames exist.
+- Sign-in limits count a username's wrong passwords per IP address (5 in 15 minutes), with a cap of 50 from anywhere:
+  guesses from elsewhere no longer lock a person out. A right step-up while the name is blocked answers
+  `too_many_attempts` (429) and keeps the session; only the session's own wrong password at the limit ends it.
+- Creating an account, a service account or a group, locking an account, removing an address and saving privacy
+  settings ask for a step-up, as an admin's other changes do; a test keeps every new admin change to that.
+- `Guard:Seed:AdminPassword` needs at least 10 characters when the admin is made. The sample host keeps its password in
+  `appsettings.Development.json`, so a copy started in Production needs one of its own.
 
 ### Changed
 

@@ -111,6 +111,7 @@ public class GroupsController(GuardDb guardDb, MembershipGraph graph, SecurityLo
     public sealed record UpdateGroupInput(string Name, string? Description, Dictionary<string, string>? Attributes = null, List<string>? EmailDomains = null);
 
     [HttpPost]
+    [StepUp]
     public async Task<GroupDto> Create([FromBody] CreateGroupInput input, CancellationToken cancellationToken)
     {
         Guid directoryId = input.DirectoryId ?? GuardConstants.InternalDirectoryId;

@@ -8,24 +8,31 @@ using Volo.Abp.DependencyInjection;
 namespace Toda.Guard.Services;
 
 /// <summary>
-/// Brute-force limit per username and per IP: 5 failures in 15 minutes blocks for 15 minutes (20 per IP). Counted for
-/// the whole site (<see cref="IGuardRateLimits"/>), so several servers allow no more than one.
+/// Brute-force limits: 5 failures in 15 minutes for a username from one IP, 50 for a username from anywhere, and 20 for
+/// an IP whatever the usernames; each blocks for the rest of its window. Counted per address first, so someone elsewhere
+/// can't lock a person out with five wrong passwords; the cap per username still bounds guesses spread over many
+/// addresses. Counted for the whole site (<see cref="IGuardRateLimits"/>), so several servers allow no more than one.
 /// </summary>
 public class LoginRateLimiter(IGuardRateLimits limits) : ISingletonDependency
 {
     private const int MaxFailures = 5;
+    private const int MaxFailuresFromAnywhere = 50;
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(15);
 
     public async Task<bool> IsBlockedAsync(string username, string? ip, CancellationToken cancellationToken = default) =>
-        await limits.CountAsync(UserKey(username), Window, cancellationToken) >= MaxFailures || await IpBlockedAsync(ip, cancellationToken);
+        await limits.CountAsync(UserAtKey(username, ip), Window, cancellationToken) >= MaxFailures
+        || await limits.CountAsync(UserKey(username), Window, cancellationToken) >= MaxFailuresFromAnywhere
+        || await IpBlockedAsync(ip, cancellationToken);
 
     /// <summary>
-    /// Takes one of the username's tries before its password is checked; false when it has none left or the IP is
-    /// blocked. Taken first, so guesses sent at once can't all be checked before the first failure counts. A right
-    /// password gives the tries back (<see cref="ResetAsync"/>).
+    /// Takes one of the username's tries, from this IP and from anywhere, before its password is checked; false when
+    /// either has none left or the IP is blocked. Taken first, so guesses sent at once can't all be checked before the
+    /// first failure counts. A right password gives the tries back (<see cref="ResetAsync"/>).
     /// </summary>
     public async Task<bool> TryBeginAsync(string username, string? ip, CancellationToken cancellationToken = default) =>
-        !await IpBlockedAsync(ip, cancellationToken) && await limits.TryTakeAsync(UserKey(username), MaxFailures, Window, cancellationToken);
+        !await IpBlockedAsync(ip, cancellationToken)
+        && await limits.TryTakeAsync(UserAtKey(username, ip), MaxFailures, Window, cancellationToken)
+        && await limits.TryTakeAsync(UserKey(username), MaxFailuresFromAnywhere, Window, cancellationToken);
 
     /// <summary>A failure after <see cref="TryBeginAsync"/>, which counted it for the username already: counted for the IP.</summary>
     public async Task RecordFailureAsync(string? ip, CancellationToken cancellationToken = default)
@@ -41,17 +48,26 @@ public class LoginRateLimiter(IGuardRateLimits limits) : ISingletonDependency
 
     private static string UserKey(string username) => $"sign-in|u:{username}";
 
+    private static string UserAtKey(string username, string? ip) => $"sign-in|u:{username}|ip:{ip}";
+
     private static string IpKey(string ip) => $"sign-in|ip:{ip}";
 
-    public Task ResetAsync(string username, CancellationToken cancellationToken = default) => limits.ResetAsync(UserKey(username), cancellationToken);
+    public async Task ResetAsync(string username, string? ip, CancellationToken cancellationToken = default)
+    {
+        await limits.ResetAsync(UserAtKey(username, ip), cancellationToken);
+        await limits.ResetAsync(UserKey(username), cancellationToken);
+    }
 }
 
 /// <summary>Credential check only. Tokens are issued by the OpenIddict token endpoint (ADR 0007).</summary>
 /// <summary>MergedInto: the username to sign in with instead, when the account was merged (ADR 0044) and the password was right.</summary>
 public sealed record LoginResult(bool Succeeded, Account? Account, string? ErrorCode, string? MergedInto = null);
 
-/// <summary>A step-up's outcome: whether the password was right, and whether the session must end (too many failures).</summary>
-public sealed record StepUpResult(bool Succeeded, bool EndSession);
+/// <summary>
+/// A step-up's outcome: whether the password was right, whether the session must end (too many failures), and whether
+/// it wasn't checked because the username is blocked for now.
+/// </summary>
+public sealed record StepUpResult(bool Succeeded, bool EndSession, bool Blocked = false);
 
 public class AuthService(
     GuardDb guardDb,
@@ -60,7 +76,17 @@ public class AuthService(
 {
     private static readonly PasswordHasher<DirectoryUser> Hasher = new();
 
+    /// <summary>A hash no password matches, checked where there's none of the account's to check (<see cref="Equalize"/>).</summary>
+    private static readonly DirectoryUser Nobody = new(Guid.Empty, Guid.Empty, "nobody", "nobody");
+    private static readonly string NobodysHash = Hasher.HashPassword(Nobody, Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+
     public static string HashPassword(DirectoryUser user, string password) => Hasher.HashPassword(user, password);
+
+    /// <summary>
+    /// Takes as long as checking a password: a sign-in refused before its hash was checked (no such username, an account
+    /// that can't sign in) mustn't answer sooner than a wrong password, or its speed tells which usernames exist.
+    /// </summary>
+    private static void Equalize(string password) => Hasher.VerifyHashedPassword(Nobody, NobodysHash, password);
 
     public async Task<LoginResult> LoginAsync(string username, string password, string? ip, CancellationToken cancellationToken = default)
     {
@@ -76,6 +102,7 @@ public class AuthService(
             Account? account = await db.Accounts.FirstOrDefaultAsync(a => a.NormalizedUsername == normalized, cancellationToken);
             if (account is null)
             {
+                Equalize(password);
                 return (false, null, "user_not_found");
             }
 
@@ -87,12 +114,14 @@ public class AuthService(
 
             if (account.Status != AccountStatus.Active)
             {
+                Equalize(password);
                 return (false, account, $"account_{account.Status.ToString().ToLowerInvariant()}");
             }
 
             // A service account acts only through its tokens.
             if (account.IsService)
             {
+                Equalize(password);
                 return (false, account, "service_account");
             }
 
@@ -120,7 +149,7 @@ public class AuthService(
                 : new LoginResult(false, null, "invalid_credentials");
         }
 
-        await limiter.ResetAsync(normalized, cancellationToken);
+        await limiter.ResetAsync(normalized, ip, cancellationToken);
         await AuditAsync("auth.login.succeeded", normalized, account!.Id, null, ip, cancellationToken);
         return new LoginResult(true, account, null);
     }
@@ -136,6 +165,7 @@ public class AuthService(
             cancellationToken);
         if (directory is not { IsActive: true, AuthenticationEnabled: true } || record is null)
         {
+            Equalize(password);
             return "account_inactive";
         }
 
@@ -170,7 +200,7 @@ public class AuthService(
         string? username = account?.NormalizedUsername;
         if (refused is null)
         {
-            await limiter.ResetAsync(username!, cancellationToken);
+            await limiter.ResetAsync(username!, ip, cancellationToken);
             await AuditAsync(SecurityAuditTypes.StepUpSucceeded, username, accountId, null, ip, cancellationToken);
             return new StepUpResult(true, false);
         }
@@ -180,10 +210,12 @@ public class AuthService(
             await limiter.RecordFailureAsync(ip, cancellationToken);
         }
 
+        // A wrong password that reaches the limit ends the session; a step-up refused because the name was blocked already
+        // (someone else's guesses, maybe) doesn't, or anyone could end a person's session by failing to sign in as them.
         bool end = refused is "account_inactive" or "directory_inactive" or "directory_signin_disabled"
-            || (username is not null && await limiter.IsBlockedAsync(username, ip, cancellationToken));
+            || (username is not null && refused is "wrong_password" or "invalid_credentials" && await limiter.IsBlockedAsync(username, ip, cancellationToken));
         await AuditAsync(end ? SecurityAuditTypes.StepUpEndedSession : SecurityAuditTypes.StepUpFailed, username, accountId, refused, ip, cancellationToken);
-        return new StepUpResult(false, end);
+        return new StepUpResult(false, end, refused == "too_many_attempts");
     }
 
     /// <summary>
@@ -196,11 +228,13 @@ public class AuthService(
         DirectoryUser? record = account.DirectoryUserId is { } id ? await db.DirectoryUsers.FindAsync([id], cancellationToken) : null;
         if (directory is null || record is null || !directory.IsActive)
         {
+            Equalize(password);
             return "directory_inactive";
         }
 
         if (!directory.AuthenticationEnabled)
         {
+            Equalize(password);
             return "directory_signin_disabled";
         }
 
@@ -212,8 +246,13 @@ public class AuthService(
     {
         if (directory.IsInternal)
         {
-            bool valid = record.PasswordHash is not null
-                && Hasher.VerifyHashedPassword(record, record.PasswordHash, password) != PasswordVerificationResult.Failed;
+            if (record.PasswordHash is null)
+            {
+                Equalize(password);
+                return (false, "wrong_password");
+            }
+
+            bool valid = Hasher.VerifyHashedPassword(record, record.PasswordHash, password) != PasswordVerificationResult.Failed;
             return (valid, valid ? null : "wrong_password");
         }
 

@@ -176,6 +176,11 @@ public class SessionController(AuthService auth, WebSessions sessions, GuardDb g
             return Error(401, "session_ended", "Too many wrong passwords: the session has ended. Sign in again.");
         }
 
+        if (result.Blocked)
+        {
+            return Error(429, "too_many_attempts", "Too many failed attempts. Try again in 15 minutes.");
+        }
+
         if (!result.Succeeded)
         {
             return Error(400, "step_up_failed", "The password is incorrect.");
