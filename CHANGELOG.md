@@ -6,6 +6,10 @@ change the API.
 
 ## [Unreleased]
 
+## [0.1.0-preview.2] - 2026-10-31
+
+The fixes from a security review of 0.1.0-preview.1, which they all affect: update, and stop using preview.1.
+
 ### Security
 
 - Setting up an authenticator app with a sign-in ticket is refused when the ticket's second step is a code the site
