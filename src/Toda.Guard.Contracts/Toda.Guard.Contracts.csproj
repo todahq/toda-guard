@@ -6,7 +6,7 @@
 
   <ItemGroup>
     <!-- Abilities (IAbilities) for other modules (ADR 0047 step 5). Nothing of Toda's: Guard is a package (ADR 0087). -->
-    <PackageReference Include="Casl.Net" Version="0.1.0" />
+    <PackageReference Include="Casl.Net" Version="0.2.0" />
   </ItemGroup>
 
 </Project>
